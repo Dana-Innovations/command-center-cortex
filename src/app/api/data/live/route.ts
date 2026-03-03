@@ -80,7 +80,7 @@ async function fetchCalendar(token: string) {
 // ── Fetch Asana tasks ─────────────────────────────────────────────────────────
 async function fetchAsanaTasks() {
   const res = await fetch(
-    `https://app.asana.com/api/1.0/tasks?project=1211840949719691&assignee=me&completed_since=now&opt_fields=gid,name,due_on,priority,completed,permalink_url,custom_fields&limit=30`,
+    `https://app.asana.com/api/1.0/tasks?project=1211840949719691&assignee=1206594996279383&completed_since=now&opt_fields=gid,name,due_on,priority,completed,permalink_url&limit=30`,
     { headers: { Authorization: `Bearer ${ASANA_PAT}` } }
   );
   const data = await res.json();
