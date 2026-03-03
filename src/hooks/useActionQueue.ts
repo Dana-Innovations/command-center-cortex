@@ -51,14 +51,14 @@ export function useActionQueue() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'action_queue' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setActions((prev) => [payload.new as ActionQueueItem, ...prev]);
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'action_queue' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setActions((prev) =>
             prev.map((a) =>
               a.id === (payload.new as ActionQueueItem).id
@@ -71,7 +71,7 @@ export function useActionQueue() {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'action_queue' },
-        (payload) => {
+        (payload: { old: unknown }) => {
           setActions((prev) =>
             prev.filter((a) => a.id !== (payload.old as ActionQueueItem).id)
           );

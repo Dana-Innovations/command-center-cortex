@@ -9,17 +9,32 @@ import { TimelineView } from "@/components/views/TimelineView";
 import { TrendsView } from "@/components/views/TrendsView";
 import { SalesView } from "@/components/views/SalesView";
 import { EODSummary } from "@/components/modals/EODSummary";
+import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
 
 export default function Home() {
+  return (
+    <LiveDataProvider>
+      <HomeContent />
+    </LiveDataProvider>
+  );
+}
+
+function HomeContent() {
   const [activeTab, setActiveTab] = useState<TabId>("command-center");
   const [eodOpen, setEodOpen] = useState(false);
+  const { loading, fetchedAt, error, refetch } = useLiveData();
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
       {/* Grain overlay */}
       <div className="grain-overlay" aria-hidden="true" />
 
-      <Header />
+      <Header
+        onRefresh={refetch}
+        isSyncing={loading}
+        lastSyncedAt={fetchedAt}
+        syncError={error}
+      />
 
       <TabBar
         activeTab={activeTab}

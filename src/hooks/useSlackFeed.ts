@@ -40,14 +40,14 @@ export function useSlackFeed() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'slack_feed' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setMessages((prev) => [payload.new as SlackFeedMessage, ...prev].slice(0, MAX_MESSAGES));
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'slack_feed' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === (payload.new as SlackFeedMessage).id
@@ -60,7 +60,7 @@ export function useSlackFeed() {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'slack_feed' },
-        (payload) => {
+        (payload: { old: unknown }) => {
           setMessages((prev) =>
             prev.filter((m) => m.id !== (payload.old as SlackFeedMessage).id)
           );

@@ -34,14 +34,14 @@ export function useTeams() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'teams_channels' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setChannels((prev) => [...prev, payload.new as TeamsChannel]);
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'teams_channels' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setChannels((prev) =>
             prev.map((c) =>
               c.id === (payload.new as TeamsChannel).id ? (payload.new as TeamsChannel) : c
@@ -52,7 +52,7 @@ export function useTeams() {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'teams_channels' },
-        (payload) => {
+        (payload: { old: unknown }) => {
           setChannels((prev) =>
             prev.filter((c) => c.id !== (payload.old as TeamsChannel).id)
           );

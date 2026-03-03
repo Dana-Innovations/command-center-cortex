@@ -52,14 +52,14 @@ export function usePowerBI() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'powerbi_kpis' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setKpis((prev) => [payload.new as PowerBIKPI, ...prev]);
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'powerbi_kpis' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           const row = payload.new as PowerBIKPI;
           setKpis((prev) => prev.map((k) => (k.id === row.id ? row : k)));
         }
@@ -67,7 +67,7 @@ export function usePowerBI() {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'powerbi_kpis' },
-        (payload) => {
+        (payload: { old: unknown }) => {
           setKpis((prev) =>
             prev.filter((k) => k.id !== (payload.old as PowerBIKPI).id)
           );
@@ -80,7 +80,7 @@ export function usePowerBI() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'powerbi_report_configs' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setReportConfigs((prev) => [
             payload.new as PowerBIReportConfig,
             ...prev,
@@ -90,7 +90,7 @@ export function usePowerBI() {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'powerbi_report_configs' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           const row = payload.new as PowerBIReportConfig;
           setReportConfigs((prev) =>
             prev.map((r) => (r.id === row.id ? row : r))
@@ -100,7 +100,7 @@ export function usePowerBI() {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'powerbi_report_configs' },
-        (payload) => {
+        (payload: { old: unknown }) => {
           setReportConfigs((prev) =>
             prev.filter(
               (r) => r.id !== (payload.old as PowerBIReportConfig).id

@@ -35,14 +35,14 @@ export function useSyncStatus() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'sync_log' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setLogs((prev) => [payload.new as SyncLog, ...prev].slice(0, 10));
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'sync_log' },
-        (payload) => {
+        (payload: { new: unknown }) => {
           setLogs((prev) =>
             prev.map((l) =>
               l.id === (payload.new as SyncLog).id ? (payload.new as SyncLog) : l

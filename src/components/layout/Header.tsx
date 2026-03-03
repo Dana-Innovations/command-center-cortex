@@ -10,6 +10,7 @@ interface HeaderProps {
   onRefresh?: () => void;
   isSyncing?: boolean;
   lastSyncedAt?: Date | null;
+  syncError?: string | null;
   commandItems?: CommandItem[];
 }
 
@@ -17,6 +18,7 @@ export function Header({
   onRefresh,
   isSyncing = false,
   lastSyncedAt = null,
+  syncError = null,
   commandItems = [],
 }: HeaderProps) {
   const { user, signOut } = useAuth();
@@ -91,7 +93,7 @@ export function Header({
 
         {/* Right: controls */}
         <div className="header-controls flex items-center gap-2">
-          <SyncIndicator isSyncing={isSyncing} lastSyncedAt={lastSyncedAt} />
+          <SyncIndicator isSyncing={isSyncing} lastSyncedAt={lastSyncedAt} syncError={syncError} />
 
           {/* Search */}
           <Button
