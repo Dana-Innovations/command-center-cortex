@@ -1,241 +1,145 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
 
-const CORTEX_URL = "https://cortex-bice.vercel.app/mcp";
+const M365_CLIENT_ID = process.env.M365_CLIENT_ID!;
+const M365_TENANT_ID = process.env.M365_TENANT_ID!;
+const M365_REFRESH_TOKEN = process.env.M365_REFRESH_TOKEN!;
+const ASANA_PAT = process.env.ASANA_PAT!;
 
-interface CortexCall {
-  tool: string;
-  args: Record<string, unknown>;
-}
-
-async function callCortex({ tool, args }: CortexCall): Promise<unknown> {
-  const apiKey = process.env.CORTEX_API_KEY ?? "";
-  const res = await fetch(CORTEX_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: tool, arguments: args },
-    }),
+// ── M365: get a fresh access token via refresh token ──────────────────────────
+async function getM365Token(): Promise<string> {
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: M365_CLIENT_ID,
+    refresh_token: M365_REFRESH_TOKEN,
+    scope: 'https://graph.microsoft.com/.default offline_access',
   });
-
-  if (!res.ok) {
-    throw new Error(`Cortex HTTP ${res.status}`);
-  }
-
-  const rpc = await res.json();
-  if (rpc.error) {
-    throw new Error(rpc.error.message ?? JSON.stringify(rpc.error));
-  }
-
-  const content = rpc.result?.content;
-  if (!Array.isArray(content) || content.length === 0) return null;
-
-  const text = content.find((c: { type: string }) => c.type === "text")?.text;
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  const res = await fetch(
+    `https://login.microsoftonline.com/${M365_TENANT_ID}/oauth2/v2.0/token`,
+    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }
+  );
+  const data = await res.json();
+  if (!data.access_token) throw new Error(`M365 token error: ${JSON.stringify(data)}`);
+  return data.access_token;
 }
 
-/* ── Parsers ─────────────────────────────────────────── */
-
-function parseEmails(raw: unknown) {
-  if (!raw || typeof raw !== "object") return [];
-  const arr = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).value;
-  if (!Array.isArray(arr)) return [];
-
-  const now = new Date().toISOString();
-  return arr.map((e: Record<string, unknown>, i: number) => {
-    const from = e.from as Record<string, unknown> | undefined;
-    const addr = from?.emailAddress as Record<string, string> | undefined;
-    const receivedAt = (e.receivedDateTime as string) ?? now;
-    const daysOld = Math.max(
-      0,
-      Math.floor((Date.now() - new Date(receivedAt).getTime()) / 86_400_000)
-    );
-
+// ── Fetch emails ───────────────────────────────────────────────────────────────
+async function fetchEmails(token: string) {
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/messages?$top=25&$select=id,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview&$orderby=receivedDateTime desc&$filter=isDraft eq false`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  return (data.value ?? []).map((m: Record<string, unknown>) => {
+    const from = m.from as { emailAddress: { name: string; address: string } };
     return {
-      id: (e.id as string) ?? `email-${i}`,
-      message_id: (e.id as string) ?? `email-${i}`,
-      from_name: addr?.name ?? "",
-      from_email: addr?.address ?? "",
-      subject: (e.subject as string) ?? "(no subject)",
-      preview: (e.bodyPreview as string) ?? "",
-      body_html: "",
-      received_at: receivedAt,
-      is_read: (e.isRead as boolean) ?? false,
-      folder: "inbox",
-      has_attachments: (e.hasAttachments as boolean) ?? false,
-      outlook_url: (e.webLink as string) ?? "",
-      needs_reply: !(e.isRead as boolean),
-      days_overdue: daysOld > 1 ? daysOld : 0,
-      synced_at: now,
+      id: m.id,
+      subject: m.subject || '(no subject)',
+      from: from?.emailAddress?.name || from?.emailAddress?.address || '',
+      fromAddress: from?.emailAddress?.address || '',
+      preview: (m.bodyPreview as string)?.slice(0, 120) || '',
+      receivedAt: m.receivedDateTime,
+      isRead: m.isRead,
+      hasAttachment: m.hasAttachments,
+      outlook_url: `https://outlook.office.com/mail/inbox/id/${encodeURIComponent(m.id as string)}`,
+      needs_reply: !(m.isRead as boolean),
+      is_read: m.isRead,
+      days_overdue: 0,
     };
   });
 }
 
-function parseCalendar(raw: unknown) {
-  if (!raw || typeof raw !== "object") return [];
-  const arr = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).value;
-  if (!Array.isArray(arr)) return [];
-
-  const now = new Date().toISOString();
-  return arr.map((e: Record<string, unknown>, i: number) => {
-    const start = e.start as Record<string, string> | undefined;
-    const end = e.end as Record<string, string> | undefined;
-    const loc = e.location as Record<string, string> | undefined;
-    const org = e.organizer as Record<string, Record<string, string>> | undefined;
-    const meeting = e.onlineMeeting as Record<string, string> | undefined;
-    const attendees = e.attendees as unknown[] | undefined;
-
+// ── Fetch calendar events ─────────────────────────────────────────────────────
+async function fetchCalendar(token: string) {
+  const now = new Date();
+  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const startStr = now.toISOString();
+  const endStr = end.toISOString();
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${startStr}&endDateTime=${endStr}&$select=id,subject,start,end,location,isOnlineMeeting,attendees,organizer&$orderby=start/dateTime&$top=20`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  return (data.value ?? []).map((e: Record<string, unknown>) => {
+    const start = e.start as { dateTime: string; timeZone: string };
+    const end = e.end as { dateTime: string; timeZone: string };
+    const location = e.location as { displayName?: string };
+    const attendees = e.attendees as unknown[];
     return {
-      id: (e.id as string) ?? `cal-${i}`,
-      event_id: (e.id as string) ?? `cal-${i}`,
-      subject: (e.subject as string) ?? "(no subject)",
-      location: loc?.displayName ?? "",
-      start_time: start?.dateTime ?? now,
-      end_time: end?.dateTime ?? now,
-      is_all_day: (e.isAllDay as boolean) ?? false,
-      organizer: org?.emailAddress?.name ?? "",
-      is_online: (e.isOnlineMeeting as boolean) ?? false,
-      join_url: meeting?.joinUrl ?? (e.onlineMeetingUrl as string) ?? "",
-      outlook_url: (e.webLink as string) ?? "",
-      attendee_count: attendees?.length ?? 0,
-      synced_at: now,
+      id: e.id,
+      title: e.subject || '(no title)',
+      start: start?.dateTime,
+      end: end?.dateTime,
+      location: location?.displayName || '',
+      isOnline: e.isOnlineMeeting,
+      attendeeCount: attendees?.length ?? 0,
+      organizer: (e.organizer as { emailAddress?: { name?: string } })?.emailAddress?.name || '',
     };
   });
 }
 
-function parseTasks(raw: unknown) {
-  if (!raw || typeof raw !== "object") return [];
-  const arr = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).data;
-  if (!Array.isArray(arr)) return [];
-
-  const now = new Date().toISOString();
-  return arr.map((t: Record<string, unknown>, i: number) => {
-    const dueOn = (t.due_on as string) ?? null;
+// ── Fetch Asana tasks ─────────────────────────────────────────────────────────
+async function fetchAsanaTasks() {
+  const res = await fetch(
+    `https://app.asana.com/api/1.0/tasks?project=1211840949719691&assignee=me&completed_since=now&opt_fields=gid,name,due_on,priority,completed,permalink_url,custom_fields&limit=30`,
+    { headers: { Authorization: `Bearer ${ASANA_PAT}` } }
+  );
+  const data = await res.json();
+  const today = new Date();
+  return (data.data ?? []).map((t: Record<string, unknown>) => {
+    const dueOn = t.due_on as string | null;
     let daysOverdue = 0;
     if (dueOn) {
-      daysOverdue = Math.max(
-        0,
-        Math.floor((Date.now() - new Date(dueOn).getTime()) / 86_400_000)
-      );
+      const due = new Date(dueOn);
+      daysOverdue = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
     }
-
-    const assignee = t.assignee as Record<string, string> | undefined;
-    const memberships = t.memberships as Array<{
-      project?: { name?: string };
-    }> | undefined;
-
     return {
-      id: (t.gid as string) ?? `task-${i}`,
-      task_gid: (t.gid as string) ?? `task-${i}`,
-      name: (t.name as string) ?? "",
-      notes: (t.notes as string) ?? "",
-      due_on: dueOn,
-      completed: (t.completed as boolean) ?? false,
-      assignee: assignee?.name ?? "me",
-      project_name: memberships?.[0]?.project?.name ?? "My Tasks",
-      permalink_url: (t.permalink_url as string) ?? "",
-      priority: "medium",
+      id: t.gid,
+      name: t.name,
+      dueDate: dueOn,
+      priority: t.priority || 'normal',
+      completed: t.completed,
+      permalink_url: t.permalink_url,
       days_overdue: daysOverdue,
-      synced_at: now,
     };
   });
 }
 
-function parsePipeline(raw: unknown) {
-  if (!raw || typeof raw !== "object") return [];
-  const arr = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).records;
-  if (!Array.isArray(arr)) return [];
-
-  const now = new Date().toISOString();
-  return arr.map((r: Record<string, unknown>, i: number) => {
-    const closeDate = (r.CloseDate as string) ?? "";
-    const daysToClose = closeDate
-      ? Math.max(
-          0,
-          Math.floor((new Date(closeDate).getTime() - Date.now()) / 86_400_000)
-        )
-      : 999;
-
-    const sfId = (r.Id as string) ?? `opp-${i}`;
-    const account = r.Account as Record<string, string> | undefined;
-    const accountName = account?.Name ?? (r.AccountId as string) ?? "";
-
-    return {
-      id: sfId,
-      sf_opportunity_id: sfId,
-      name: (r.Name as string) ?? "",
-      account_name: accountName,
-      owner_name: "",
-      stage: (r.StageName as string) ?? "",
-      amount: Number(r.Amount) || 0,
-      probability: 0,
-      close_date: closeDate,
-      days_to_close: daysToClose,
-      is_closed: false,
-      is_won: false,
-      last_activity_date: null,
-      next_step: null,
-      sf_url: `https://sonance.lightning.force.com/lightning/r/Opportunity/${sfId}/view`,
-      synced_at: now,
-    };
-  });
+// ── Fetch Salesforce pipeline ─────────────────────────────────────────────────
+async function fetchSalesforcePipeline() {
+  // Salesforce requires OAuth — skip for now, return empty
+  // (SF credentials aren't available server-side without a separate OAuth flow)
+  return [];
 }
 
-/* ── Route handler ───────────────────────────────────── */
-
+// ── Main handler ──────────────────────────────────────────────────────────────
 export async function GET() {
-  const [emailsRes, calendarRes, tasksRes, pipelineRes] =
-    await Promise.allSettled([
-      callCortex({
-        tool: "m365_list_emails",
-        args: { folder: "inbox", top: 20 },
-      }),
-      callCortex({
-        tool: "m365_list_events",
-        args: { days: 7 },
-      }),
-      callCortex({
-        tool: "asana_get_tasks",
-        args: { project_id: "1211840949719691", assignee: "me" },
-      }),
-      callCortex({
-        tool: "salesforce_query",
-        args: {
-          soql: "SELECT Id,Name,Amount,StageName,CloseDate,AccountId FROM Opportunity WHERE StageName NOT IN ('Closed Won','Closed Lost') ORDER BY Amount DESC LIMIT 20",
-        },
-      }),
+  try {
+    const [tokenResult, asanaResult, sfResult] = await Promise.allSettled([
+      getM365Token(),
+      fetchAsanaTasks(),
+      fetchSalesforcePipeline(),
     ]);
 
-  const emails =
-    emailsRes.status === "fulfilled" ? parseEmails(emailsRes.value) : [];
-  const calendar =
-    calendarRes.status === "fulfilled"
-      ? parseCalendar(calendarRes.value)
-      : [];
-  const tasks =
-    tasksRes.status === "fulfilled" ? parseTasks(tasksRes.value) : [];
-  const pipeline =
-    pipelineRes.status === "fulfilled"
-      ? parsePipeline(pipelineRes.value)
-      : [];
+    const token = tokenResult.status === 'fulfilled' ? tokenResult.value : null;
 
-  return NextResponse.json({
-    emails,
-    calendar,
-    tasks,
-    pipeline,
-    fetchedAt: new Date().toISOString(),
-    source: "cortex-live",
-  });
+    const [emailsResult, calendarResult] = await Promise.allSettled([
+      token ? fetchEmails(token) : Promise.resolve([]),
+      token ? fetchCalendar(token) : Promise.resolve([]),
+    ]);
+
+    return NextResponse.json({
+      emails: emailsResult.status === 'fulfilled' ? emailsResult.value : [],
+      calendar: calendarResult.status === 'fulfilled' ? calendarResult.value : [],
+      tasks: asanaResult.status === 'fulfilled' ? asanaResult.value : [],
+      pipeline: sfResult.status === 'fulfilled' ? sfResult.value : [],
+      fetchedAt: new Date().toISOString(),
+      source: 'live',
+      errors: {
+        m365: token ? null : (tokenResult.status === 'rejected' ? String(tokenResult.reason) : null),
+        asana: asanaResult.status === 'rejected' ? String(asanaResult.reason) : null,
+      }
+    });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
 }
