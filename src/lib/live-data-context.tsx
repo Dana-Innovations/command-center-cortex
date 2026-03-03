@@ -14,6 +14,7 @@ import type {
   CalendarEvent,
   Task,
   SalesforceOpportunity,
+  Chat,
 } from "./types";
 
 interface LiveDataState {
@@ -21,6 +22,7 @@ interface LiveDataState {
   calendar: CalendarEvent[];
   tasks: Task[];
   opportunities: SalesforceOpportunity[];
+  chats: Chat[];
   loading: boolean;
   error: string | null;
   fetchedAt: Date | null;
@@ -36,9 +38,8 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [calendar, setCalendar] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [opportunities, setOpportunities] = useState<SalesforceOpportunity[]>(
-    []
-  );
+  const [opportunities, setOpportunities] = useState<SalesforceOpportunity[]>([]);
+  const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
@@ -54,6 +55,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       setCalendar((data.calendar ?? []) as CalendarEvent[]);
       setTasks((data.tasks ?? []) as Task[]);
       setOpportunities((data.pipeline ?? []) as SalesforceOpportunity[]);
+      setChats((data.chats ?? []) as Chat[]);
       setFetchedAt(new Date(data.fetchedAt));
       setError(null);
     } catch (e) {
@@ -84,6 +86,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         calendar,
         tasks,
         opportunities,
+        chats,
         loading,
         error,
         fetchedAt,

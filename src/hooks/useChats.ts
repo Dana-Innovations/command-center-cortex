@@ -1,13 +1,13 @@
 'use client';
 
-import type { Chat } from '@/lib/types';
+import { useLiveData } from '@/lib/live-data-context';
 
-/** No Cortex source for Teams chats — returns empty for live mode */
 export function useChats() {
+  const { chats, loading, error, fetchedAt } = useLiveData();
   return {
-    chats: [] as Chat[],
-    loading: false,
-    error: null,
-    lastSynced: null,
+    chats,
+    loading,
+    error,
+    lastSynced: fetchedAt?.toISOString() ?? null,
   };
 }
