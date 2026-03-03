@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+/* Dark mode variant */
+@variant dark (&:where(.dark, .dark *));
+
+/* ============================================
+   EXECUTIVE COMMAND CENTER — DESIGN TOKENS
+   Merges Sonance brand system with executive dashboard aesthetics
+   ============================================ */
+
+:root {
+  /* Sonance Core */
+  --sonance-charcoal: #333F48;
+  --sonance-blue: #00A3E1;
+  --sonance-light-gray: #D9D9D6;
+
+  /* Executive Dashboard Accents */
+  --accent-amber: #D4A44C;
+  --accent-amber-dim: rgba(212, 164, 76, 0.15);
+  --accent-teal: #4ECDC4;
+  --accent-teal-dim: rgba(78, 205, 196, 0.12);
+  --accent-red: #E85D5D;
+  --accent-red-dim: rgba(232, 93, 93, 0.12);
+  --accent-green: #5AC78B;
+  --accent-bright-green: #7FE8A6;
+  --accent-gray: #666;
+
+  /* Light Mode Defaults */
+  --bg-primary: #FAFAFA;
+  --bg-secondary: #F0F0F0;
+  --bg-card: rgba(255, 255, 255, 0.95);
+  --bg-card-border: rgba(0, 0, 0, 0.08);
+  --bg-card-hover-border: rgba(212, 164, 76, 0.35);
+  --bg-card-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  --text-heading: #1A1A1A;
+  --text-body: #444;
+  --text-muted: #888;
+  --glass-backdrop: blur(0px);
+  --grain-opacity: 0;
+  --progress-bg: rgba(0,0,0,0.06);
+  --draft-bg: rgba(212, 164, 76, 0.08);
+  --tab-bg: rgba(0,0,0,0.04);
+  --tab-active-bg: rgba(212, 164, 76, 0.12);
+  --timeline-line: rgba(0,0,0,0.1);
+  --link-color: #9a7630;
+  --link-hover: #7a5d24;
+
+  /* Typography */
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-display: 'Playfair Display', serif;
+
+  /* Tailwind theme mappings */
+  --background: var(--bg-primary);
+  --foreground: var(--text-body);
+  --card: var(--bg-card);
+  --card-border: var(--bg-card-border);
+  --border: var(--bg-card-border);
+  --primary: var(--accent-amber);
+  --primary-foreground: #0d0d0d;
+}
+
+/* Dark Mode */
+.dark {
+  --bg-primary: #0d0d0d;
+  --bg-secondary: #151515;
+  --bg-card: rgba(25, 25, 25, 0.7);
+  --bg-card-border: rgba(212, 164, 76, 0.12);
+  --bg-card-hover-border: rgba(212, 164, 76, 0.28);
+  --bg-card-shadow: 0 4px 24px rgba(0,0,0,0.3);
+  --text-heading: #FFFFFF;
+  --text-body: #B8B8B8;
+  --text-muted: #777;
+  --glass-backdrop: blur(16px);
+  --grain-opacity: 0.035;
+  --progress-bg: rgba(255,255,255,0.06);
+  --draft-bg: rgba(212, 164, 76, 0.06);
+  --tab-bg: rgba(255,255,255,0.04);
+  --tab-active-bg: rgba(212, 164, 76, 0.1);
+  --timeline-line: rgba(255,255,255,0.08);
+  --link-color: rgba(212, 164, 76, 0.85);
+  --link-hover: #D4A44C;
+  --background: var(--bg-primary);
+  --foreground: var(--text-body);
+  --card: var(--bg-card);
+  --card-border: var(--bg-card-border);
+  --border: var(--bg-card-border);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-border: var(--card-border);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-red: var(--accent-red);
+  --color-accent-green: var(--accent-green);
+  --color-text-heading: var(--text-heading);
+  --color-text-body: var(--text-body);
+  --color-text-muted: var(--text-muted);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+/* Base Styles */
+html { font-size: 15px; scroll-behavior: smooth; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-primary);
+  color: var(--text-body);
+  min-height: 100vh;
+  line-height: 1.55;
+  transition: background 0.4s ease, color 0.4s ease;
+  overflow-x: hidden;
+}
+
+/* Grain Overlay */
+.grain-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 128px;
+}
+
+/* Glass Card Base */
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-card-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  transition: border-color 0.3s ease, transform 0.25s ease, box-shadow 0.3s ease;
+  box-shadow: var(--bg-card-shadow);
+  position: relative;
+  overflow: hidden;
+}
+.glass-card:hover {
+  border-color: var(--bg-card-hover-border);
+  transform: scale(1.005) translateY(-2px);
+}
+
+/* Score Colors */
+.score-red { color: var(--accent-red); }
+.score-amber { color: var(--accent-amber); }
+.score-teal { color: var(--accent-teal); }
+.score-gray { color: var(--accent-gray); }
+
+/* Source Tags */
+.tag-email { background: rgba(212,164,76,0.12); color: var(--accent-amber); }
+.tag-teams { background: rgba(78,205,196,0.12); color: var(--accent-teal); }
+.tag-asana { background: rgba(232,93,93,0.12); color: var(--accent-red); }
+.tag-slack { background: rgba(90,199,139,0.12); color: var(--accent-green); }
+.tag-salesforce { background: rgba(0,112,210,0.12); color: #0070D2; }
+
+/* Progress Bars */
+.pct-amber { color: var(--accent-amber); }
+.pct-green { color: var(--accent-green); }
+.pct-bright-green { color: var(--accent-bright-green); }
+.pct-red { color: var(--accent-red); }
+
+/* Staggered Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.anim-card {
+  animation: fadeUp 0.5s ease forwards;
+}
+
+/* NOW indicator pulse */
+@keyframes nowPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(232,93,93,0.5); }
+  50% { box-shadow: 0 0 12px rgba(232,93,93,0.8); }
+}
+
+/* Flash pulse for alerts */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.flash-pulse { animation: pulse 1.5s ease-in-out infinite; }
+
+/* Hot links */
+.hot-link {
+  color: var(--link-color);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.hot-link:hover { color: var(--link-hover); }
+
+/* Refresh animation */
+@keyframes spin { to { transform: rotate(360deg); } }
+.refreshing .refresh-icon { animation: spin 1s linear infinite; }
+
+/* Print */
+@media print {
+  .grain-overlay, .tab-bar, .header-controls, .main-footer { display: none !important; }
+  .glass-card { break-inside: avoid; }
+}
