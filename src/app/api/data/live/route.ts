@@ -80,12 +80,19 @@ async function fetchCalendar(token: string) {
 // ── Fetch Asana tasks ─────────────────────────────────────────────────────────
 async function fetchAsanaTasks() {
   const res = await fetch(
-    `https://app.asana.com/api/1.0/tasks?project=1211840949719691&assignee=1206594996279383&completed_since=now&opt_fields=gid,name,due_on,priority,completed,permalink_url&limit=30`,
+    `https://app.asana.com/api/1.0/tasks?project=1211840949719691&opt_fields=gid,name,due_on,completed,permalink_url,assignee&limit=50`,
     { headers: { Authorization: `Bearer ${ASANA_PAT}` } }
   );
   const data = await res.json();
   const today = new Date();
-  return (data.data ?? []).map((t: Record<string, unknown>) => {
+  const ARI_GID = '1206594996279383';
+  return (data.data ?? [])
+    .filter((t: Record<string, unknown>) => {
+      if (t.completed) return false;
+      const assignee = t.assignee as { gid?: string } | null;
+      return !assignee || assignee.gid === ARI_GID;
+    })
+    .map((t: Record<string, unknown>) => {
     const dueOn = t.due_on as string | null;
     let daysOverdue = 0;
     if (dueOn) {
