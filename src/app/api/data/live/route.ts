@@ -72,7 +72,7 @@ async function getM365Token(): Promise<string> {
 }
 
 async function fetchEmails(token: string) {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const filter = encodeURIComponent(`inferenceClassification eq 'focused' and isDraft eq false and receivedDateTime ge ${since}`);
   const res = await fetch(
     `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=40&$select=id,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview&$filter=${filter}`,

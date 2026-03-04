@@ -32,8 +32,8 @@ function getEnergyBonus(item: PriorityItem): number {
     hour: 'numeric', minute: 'numeric', hour12: false, timeZone: 'America/Los_Angeles',
   }).split(':').reduce((acc, v, i) => acc + (i === 0 ? parseInt(v) : parseInt(v) / 60), 0);
 
-  // Evening: surface only truly urgent (keyword-matched) items
-  if (h >= 18) return item.urgent ? 5 : -30;
+  // Evening: boost truly urgent, gently deprioritize others — but never eliminate
+  if (h >= 18) return item.urgent ? 15 : (item.financial || item.legal) ? 5 : -10;
   // Late afternoon: surface strategic/multi-person items
   if (h >= 15) return (item.financial || item.legal || item.multiplePeopleWaiting) ? 10 : 0;
   // Core hours: neutral
@@ -67,9 +67,12 @@ export function usePriorityScore() {
         (Date.now() - new Date(email.received_at).getTime()) / (1000 * 60 * 60 * 24)
       ));
 
+      // Skip emails older than 14 days that are also read and have no signals
+      if (receivedDaysAgo > 14 && !isUnread && !isFinancial && !isLegal && !isUrgent) continue;
+
       // Base: internal Sonance > external; recent > old
-      const recencyBonus = receivedDaysAgo === 0 ? 12 : receivedDaysAgo === 1 ? 6 : receivedDaysAgo <= 3 ? 2 : 0;
-      const basePriority = (isFromSonance ? 28 : 18) + recencyBonus;
+      const recencyBonus = receivedDaysAgo === 0 ? 15 : receivedDaysAgo === 1 ? 10 : receivedDaysAgo <= 3 ? 6 : receivedDaysAgo <= 7 ? 3 : 0;
+      const basePriority = (isFromSonance ? 30 : 22) + recencyBonus;
 
       priorityItems.push({
         title: email.subject,
@@ -77,8 +80,8 @@ export function usePriorityScore() {
         url: email.outlook_url,
         daysOverdue: isUnread ? Math.max(0, receivedDaysAgo - 1) : 0,
         needsReply: isUnread,
-        urgent: isUrgent,              // NOT all unread
-        requiresAction: isUnread && (isFinancial || isLegal || isUrgent || receivedDaysAgo <= 1),
+        urgent: isUrgent,
+        requiresAction: isFinancial || isLegal || isUrgent || (isUnread && receivedDaysAgo <= 2),
         multiplePeopleWaiting: false,
         hardDeadlineWithin7: false,
         financial: isFinancial,
@@ -109,20 +112,30 @@ export function usePriorityScore() {
 
     // ── Teams Chats ───────────────────────────────────────────────────
     for (const chat of chats) {
-      const isGroupChat = (chat.members?.length || 0) > 2;
+      const topic = chat.topic || '';
+      const preview = chat.last_message_preview || '';
+      const title = topic || preview || 'Teams message';
+      // members array is often empty from API — detect group by topic keywords
+      const isGroupChat = (chat.members?.length || 0) > 2
+        || /taskforce|committee|team|slt|project|group|weekly|sync/i.test(topic);
+      const subj = (topic + ' ' + preview).toLowerCase();
+      const isFinancial = /budget|revenue|cost|invoice|payment|pricing/.test(subj);
+      const isLegal = /legal|litigation|compliance|npi|counsel/.test(subj);
+      const isUrgent = /\burgent\b|asap|critical|emergency/.test(subj);
+      // All Teams chats are active conversations — treat as needing attention
       priorityItems.push({
-        title: chat.topic || chat.last_message_preview || 'Teams message',
+        title,
         source: 'teams',
         url: '',
         daysOverdue: 0,
         needsReply: true,
-        urgent: false,
-        requiresAction: false,
+        urgent: isUrgent,
+        requiresAction: true,
         multiplePeopleWaiting: isGroupChat,
         hardDeadlineWithin7: false,
-        financial: false,
-        legal: false,
-        basePriority: isGroupChat ? 18 : 12,
+        financial: isFinancial,
+        legal: isLegal,
+        basePriority: isGroupChat ? 30 : 22, // high enough to survive evening mode
       });
     }
 
@@ -158,7 +171,7 @@ export function usePriorityScore() {
         const bonus = getEnergyBonus(item);
         return { ...item, score: base, energyBonus: bonus, displayScore: Math.max(0, Math.min(100, base + bonus)) };
       })
-      .filter((item) => item.displayScore > 0)
+      .filter((item) => item.displayScore >= 10) // show anything with meaningful score
       .sort((a, b) => (b.displayScore ?? 0) - (a.displayScore ?? 0));
   }, [emails, tasks, chats, opportunities]);
 
