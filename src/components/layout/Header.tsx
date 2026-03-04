@@ -6,6 +6,7 @@ import { SyncIndicator } from "@/components/ui/SyncIndicator";
 import { CommandBar, type CommandItem } from "@/components/ui/CommandBar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLiveData } from "@/lib/live-data-context";
+import { ConnectedServicesPanel } from "@/components/ui/ConnectedServicesPanel";
 
 interface HeaderProps {
   onRefresh?: () => void;
@@ -28,6 +29,7 @@ export function Header({
   const [dateStr, setDateStr] = useState("");
   const [clock, setClock] = useState("");
   const [commandBarOpen, setCommandBarOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
 
   const userInitial = user?.user_metadata?.full_name?.[0] ?? user?.email?.[0] ?? "?";
   const userName = user?.user_metadata?.full_name ?? user?.email ?? "";
@@ -154,6 +156,19 @@ export function Header({
             </svg>
           </Button>
 
+          {/* Connected Services */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setServicesOpen(true)}
+            aria-label="Connected services"
+            title="Manage connected services"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          </Button>
+
           {/* Print */}
           <Button
             variant="ghost"
@@ -180,6 +195,12 @@ export function Header({
           </button>
         </div>
       </header>
+
+      {/* Connected Services Panel */}
+      <ConnectedServicesPanel
+        open={servicesOpen}
+        onClose={() => setServicesOpen(false)}
+      />
 
       {/* Command Bar */}
       <CommandBar
