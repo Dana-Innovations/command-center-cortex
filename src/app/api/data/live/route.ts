@@ -9,10 +9,7 @@ const CORTEX_URL = 'https://cortex-bice.vercel.app/mcp/cortex';
 
 // ─── Cortex MCP client ────────────────────────────────────────────────────────
 
-let cortexSession: string | null = null;
-
 async function cortexInit(): Promise<string> {
-  if (cortexSession) return cortexSession;
   const res = await fetch(CORTEX_URL, {
     method: 'POST',
     headers: {
@@ -28,8 +25,11 @@ async function cortexInit(): Promise<string> {
     }),
   });
   const sessionId = res.headers.get('mcp-session-id');
-  if (sessionId) cortexSession = sessionId;
-  return sessionId ?? '';
+  if (!sessionId) {
+    const body = await res.text();
+    throw new Error(`Cortex init failed — no session ID. Status: ${res.status}. Body: ${body.slice(0, 200)}`);
+  }
+  return sessionId;
 }
 
 async function cortexCall(sessionId: string, id: string, tool: string, args: Record<string, unknown>) {
