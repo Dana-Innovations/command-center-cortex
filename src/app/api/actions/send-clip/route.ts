@@ -1,169 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCortexToken, cortexInit, cortexCall } from '@/lib/cortex/client';
 
-async function getToken() {
-  const refreshToken = process.env.M365_REFRESH_TOKEN;
-  const clientId = process.env.M365_CLIENT_ID;
-  const tenantId = process.env.M365_TENANT_ID;
-  if (!refreshToken || !clientId || !tenantId) throw new Error('M365 env vars missing');
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: clientId,
-      refresh_token: refreshToken,
-      scope: 'https://graph.microsoft.com/.default offline_access',
-    }),
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error('Token refresh failed');
-  return data.access_token;
-}
-
-async function uploadImageToOneDrive(token: string, imageBase64: string, filename: string): Promise<string> {
-  const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
-  const mime = mimeMatch?.[1] || 'image/jpeg';
-  const buffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
-  const uploadRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/root:/CommandCenterClips/${filename}:/content`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': mime },
-      body: buffer,
-    }
-  );
-  if (!uploadRes.ok) return '';
-  const file = await uploadRes.json();
-  const shareRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${file.id}/createLink`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'view', scope: 'organization' }),
-    }
-  );
-  const shareData = await shareRes.json();
-  return shareData.link?.webUrl || file.webUrl || '';
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { note, imageBase64, destination, reportUrl, reportName } = await req.json();
+    const cortexToken = getCortexToken(request);
+    if (!cortexToken) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const { note, imageBase64, destination, reportUrl, reportName } = await request.json();
     if (!destination) return NextResponse.json({ error: 'No destination' }, { status: 400 });
 
-    const token = await getToken();
+    const sessionId = await cortexInit(cortexToken);
+
     const timestamp = new Date().toLocaleString('en-US', {
       timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
     });
-    const filename = `clip-${Date.now()}.png`;
 
-    let imageUrl = '';
-    if (imageBase64) {
-      imageUrl = await uploadImageToOneDrive(token, imageBase64, filename).catch(() => '');
-    }
-
-    const reportBtnHtml = reportUrl
-      ? `<p style="margin:14px 0"><a href="${reportUrl}" style="display:inline-block;background:#d4a44c;color:#0d0d0d;padding:9px 18px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">📊 Open ${reportName || 'Report'} →</a></p>`
-      : '';
-
-    const reportLinkText = reportUrl ? `\n\n📊 Open report: ${reportUrl}` : '';
+    // Build content parts
+    const reportLinkText = reportUrl ? `\n\nOpen report: ${reportUrl}` : '';
+    const screenshotNote = imageBase64 ? '\n\n[Screenshot attached inline]' : '';
+    const plainContent = [
+      note || '',
+      screenshotNote,
+      reportLinkText,
+      `\n\n---\nSent from Sonance Command Center - ${timestamp}`,
+    ].filter(Boolean).join('');
 
     if (destination.type === 'teams_chat') {
-      const htmlContent = [
-        note ? `<p style="font-size:14px">${note.replace(/\n/g, '<br>')}</p>` : '',
-        imageUrl ? `<p><a href="${imageUrl}" style="color:#d4a44c;font-weight:600">📎 View screenshot →</a></p>` : '',
-        reportUrl ? `<p><a href="${reportUrl}" style="color:#d4a44c;font-weight:600">📊 Open ${reportName || 'Report'} →</a></p>` : '',
-        `<p style="color:#666;font-size:11px">Sent from Sonance Command Center &middot; ${timestamp}</p>`,
-      ].filter(Boolean).join('');
-
-      const chatRes = await fetch(
-        `https://graph.microsoft.com/v1.0/chats/${destination.id}/messages`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: { contentType: 'html', content: htmlContent } }),
-        }
-      );
-      if (!chatRes.ok) throw new Error(`Teams send failed: ${chatRes.status}`);
+      // Send a message to an existing Teams chat via Cortex MCP
+      await cortexCall(cortexToken, sessionId, 'teams-chat', 'm365__send_chat_message', {
+        chat_id: destination.id,
+        content: plainContent,
+      });
       return NextResponse.json({ ok: true, to: destination.name });
     }
 
     if (destination.type === 'teams_person') {
-      // Create or get a 1:1 chat with the person
-      const createChatRes = await fetch('https://graph.microsoft.com/v1.0/chats', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatType: 'oneOnOne',
-          members: [
-            {
-              '@odata.type': '#microsoft.graph.aadUserConversationMember',
-              roles: ['owner'],
-              'user@odata.bind': "https://graph.microsoft.com/v1.0/users('me')",
-            },
-            {
-              '@odata.type': '#microsoft.graph.aadUserConversationMember',
-              roles: ['owner'],
-              'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${destination.address}')`,
-            },
-          ],
-        }),
+      // Create a 1:1 chat and send a message
+      const chatResult = await cortexCall(cortexToken, sessionId, 'create-chat', 'm365__create_chat', {
+        member_emails: [destination.address],
       });
-
-      if (!createChatRes.ok && createChatRes.status !== 409) {
-        throw new Error(`Teams createOrGetChat failed: ${createChatRes.status}`);
+      const chatId = chatResult.id || chatResult.chatId;
+      if (!chatId) {
+        return NextResponse.json({ error: 'Could not create Teams chat' }, { status: 500 });
       }
-      const chatData = await createChatRes.json();
-      const chatId = chatData.id;
-      if (!chatId) throw new Error('No chat ID returned from createOrGetChat');
 
-      const htmlContent = [
-        note ? `<p style="font-size:14px">${note.replace(/\n/g, '<br>')}</p>` : '',
-        imageUrl ? `<p><a href="${imageUrl}" style="color:#d4a44c;font-weight:600">📎 View screenshot →</a></p>` : '',
-        reportUrl ? `<p><a href="${reportUrl}" style="color:#d4a44c;font-weight:600">📊 Open ${reportName || 'Report'} →</a></p>` : '',
-        `<p style="color:#666;font-size:11px">Sent from Sonance Command Center &middot; ${timestamp}</p>`,
-      ].filter(Boolean).join('');
-
-      const chatRes = await fetch(
-        `https://graph.microsoft.com/v1.0/chats/${chatId}/messages`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: { contentType: 'html', content: htmlContent } }),
-        }
-      );
-      if (!chatRes.ok) throw new Error(`Teams send failed: ${chatRes.status}`);
+      await cortexCall(cortexToken, sessionId, 'teams-dm', 'm365__send_chat_message', {
+        chat_id: chatId,
+        content: plainContent,
+      });
       return NextResponse.json({ ok: true, to: destination.name });
     }
 
     if (destination.type === 'email') {
+      const reportBtnHtml = reportUrl
+        ? `<p style="margin:14px 0"><a href="${reportUrl}" style="display:inline-block;background:#d4a44c;color:#0d0d0d;padding:9px 18px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">Open ${reportName || 'Report'}</a></p>`
+        : '';
+
       const htmlBody = [
         `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;max-width:680px">`,
         note ? `<p style="font-size:15px;line-height:1.5;color:#1a1a1a">${note.replace(/\n/g, '<br>')}</p>` : '',
         imageBase64 ? `<p style="margin:16px 0"><img src="${imageBase64}" style="max-width:100%;border-radius:8px;border:1px solid #ddd;display:block" /></p>` : '',
         reportBtnHtml,
-        imageUrl ? `<p style="margin:8px 0"><a href="${imageUrl}" style="color:#888;font-size:12px">View screenshot in OneDrive →</a></p>` : '',
         `<hr style="border:none;border-top:1px solid #eee;margin:20px 0" />`,
-        `<p style="color:#999;font-size:12px">Sent from Sonance Command Center &middot; ${timestamp}</p>`,
+        `<p style="color:#999;font-size:12px">Sent from Sonance Command Center - ${timestamp}</p>`,
         `</div>`,
       ].filter(Boolean).join('');
 
-      const draftRes = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: `📊 ${reportName || 'Command Center'} Clip · ${timestamp}`,
-          body: { contentType: 'HTML', content: htmlBody },
-          toRecipients: [{ emailAddress: { address: destination.address, name: destination.name || destination.address } }],
-        }),
+      await cortexCall(cortexToken, sessionId, 'send-clip-email', 'm365__send_email', {
+        to: destination.address,
+        subject: `${reportName || 'Command Center'} Clip - ${timestamp}`,
+        body: htmlBody,
+        content_type: 'HTML',
       });
-      if (!draftRes.ok) {
-        const errText = await draftRes.text();
-        throw new Error(`Draft creation failed: ${draftRes.status} - ${errText.slice(0, 100)}`);
-      }
-      const draft = await draftRes.json();
-      return NextResponse.json({ ok: true, drafted: true, to: destination.address, draftId: draft.id });
+      return NextResponse.json({ ok: true, drafted: false, sent: true, to: destination.address });
     }
 
     return NextResponse.json({ error: 'Unknown destination type' }, { status: 400 });

@@ -1,51 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCortexToken, cortexInit, cortexCall } from '@/lib/cortex/client';
 
-async function getToken() {
-  const refreshToken = process.env.M365_REFRESH_TOKEN;
-  const clientId = process.env.M365_CLIENT_ID;
-  const tenantId = process.env.M365_TENANT_ID;
-  if (!refreshToken || !clientId || !tenantId) throw new Error('M365 env vars missing');
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: clientId,
-      refresh_token: refreshToken,
-      scope: 'https://graph.microsoft.com/.default offline_access',
-    }),
-  });
-  const data = await res.json();
-  return data.access_token as string;
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { fromEmail, fromName } = await req.json();
-    if (!fromEmail) return NextResponse.json({ error: 'fromEmail required' }, { status: 400 });
-
-    const token = await getToken();
-    const res = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messageRules', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        displayName: `Block: ${fromName || fromEmail}`,
-        sequence: 1,
-        isEnabled: true,
-        conditions: { senderContains: [fromEmail] },
-        actions: { delete: true },
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      return NextResponse.json({ error: err }, { status: res.status });
+    const cortexToken = getCortexToken(request);
+    if (!cortexToken) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    return NextResponse.json({ ok: true });
+    const { fromEmail, fromName } = await request.json();
+    if (!fromEmail) return NextResponse.json({ error: 'fromEmail required' }, { status: 400 });
+
+    const sessionId = await cortexInit(cortexToken);
+
+    // Cortex MCP does not have a direct mail-rules tool.
+    // Best-effort: delete recent emails from this sender to simulate blocking,
+    // and return a note that a full block requires Outlook rules.
+    const listResult = await cortexCall(cortexToken, sessionId, 'list-from', 'm365__list_emails', {
+      limit: 20,
+      folder: 'inbox',
+      filter: `from/emailAddress/address eq '${fromEmail}'`,
+    });
+
+    const emails: { id: string }[] = listResult.emails ?? listResult.value ?? [];
+    let deleted = 0;
+    for (const email of emails) {
+      if (email.id) {
+        await cortexCall(cortexToken, sessionId, `del-${deleted}`, 'm365__delete_email', {
+          message_id: email.id,
+        });
+        deleted++;
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deleted,
+      note: `Deleted ${deleted} email(s) from ${fromName || fromEmail}. For a permanent block, create a rule in Outlook settings.`,
+    });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

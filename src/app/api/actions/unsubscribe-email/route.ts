@@ -1,57 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const CLIENT_ID = process.env.M365_CLIENT_ID!;
-const TENANT_ID = process.env.M365_TENANT_ID!;
-const REFRESH_TOKEN = process.env.M365_REFRESH_TOKEN!;
-
-async function getToken(): Promise<string> {
-  const res = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: CLIENT_ID,
-      refresh_token: REFRESH_TOKEN,
-      scope: 'https://graph.microsoft.com/.default',
-    }),
-  });
-  const data = await res.json();
-  return data.access_token;
-}
+import { getCortexToken, cortexInit, cortexCall } from '@/lib/cortex/client';
 
 function parseListUnsubscribeUrl(headerValue: string): string | null {
-  // Header looks like: <https://example.com/unsub?token=abc>, <mailto:unsub@example.com>
-  // We want the https URL, not mailto
   const matches = headerValue.match(/<(https?:\/\/[^>]+)>/gi);
   if (!matches) return null;
   const httpMatch = matches.find(m => m.toLowerCase().startsWith('<https') || m.toLowerCase().startsWith('<http'));
   if (!httpMatch) return null;
-  return httpMatch.slice(1, -1); // strip < and >
+  return httpMatch.slice(1, -1);
 }
 
 function parseMailtoAddress(headerValue: string): string | null {
   const match = headerValue.match(/<mailto:([^>]+)>/i);
   if (!match) return null;
-  return match[1]; // e.g. "unsub@example.com?subject=unsubscribe"
+  return match[1];
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { messageId } = await req.json();
+    const cortexToken = getCortexToken(request);
+    if (!cortexToken) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const { messageId } = await request.json();
     if (!messageId) return NextResponse.json({ error: 'Missing messageId' }, { status: 400 });
 
-    const token = await getToken();
+    const sessionId = await cortexInit(cortexToken);
 
-    // 1. Fetch the message with internet headers
-    const msgRes = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,subject,from,internetMessageHeaders`,
-      { headers: { Authorization: `Bearer ${token}` } }
+    // 1. Fetch the message to get List-Unsubscribe headers
+    const msg = await cortexCall(cortexToken, sessionId, 'get-msg', 'm365__get_email', {
+      message_id: messageId,
+    });
+
+    // Try to extract unsubscribe headers from the message
+    const internetHeaders: { name: string; value: string }[] =
+      (msg.internetMessageHeaders as { name: string; value: string }[]) || [];
+    const unsubHeader = internetHeaders.find(
+      (h: { name: string }) => h.name.toLowerCase() === 'list-unsubscribe'
     );
-    const msg = await msgRes.json();
-    const headers: { name: string; value: string }[] = msg.internetMessageHeaders || [];
-
-    const unsubHeader = headers.find(h => h.name.toLowerCase() === 'list-unsubscribe');
-    const unsubPostHeader = headers.find(h => h.name.toLowerCase() === 'list-unsubscribe-post');
+    const unsubPostHeader = internetHeaders.find(
+      (h: { name: string }) => h.name.toLowerCase() === 'list-unsubscribe-post'
+    );
 
     let unsubMethod = 'none';
     let unsubResult = '';
@@ -83,23 +72,18 @@ export async function POST(req: NextRequest) {
           unsubResult = `GET failed: ${e}`;
         }
       } else {
-        // mailto: unsubscribe — send email via Graph
+        // mailto: unsubscribe — send email via Cortex MCP
         const mailtoRaw = parseMailtoAddress(unsubHeader.value);
         if (mailtoRaw) {
           const [toAddress, queryString] = mailtoRaw.split('?');
           const subjectMatch = queryString?.match(/subject=([^&]+)/i);
           const subject = subjectMatch ? decodeURIComponent(subjectMatch[1]) : 'Unsubscribe';
           try {
-            await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                message: {
-                  subject,
-                  body: { contentType: 'Text', content: 'Unsubscribe' },
-                  toRecipients: [{ emailAddress: { address: toAddress } }],
-                },
-              }),
+            await cortexCall(cortexToken, sessionId, 'unsub-mailto', 'm365__send_email', {
+              to: toAddress,
+              subject,
+              body: 'Unsubscribe',
+              content_type: 'Text',
             });
             unsubMethod = 'mailto';
             unsubResult = `Sent to ${toAddress}`;
@@ -110,11 +94,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Always move the message to Deleted Items regardless of unsubscribe result
-    await fetch(`https://graph.microsoft.com/v1.0/me/messages/${messageId}/move`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destinationId: 'deleteditems' }),
+    // 2. Always delete the message regardless of unsubscribe result
+    await cortexCall(cortexToken, sessionId, 'delete-msg', 'm365__delete_email', {
+      message_id: messageId,
     });
 
     return NextResponse.json({ ok: true, method: unsubMethod, result: unsubResult });

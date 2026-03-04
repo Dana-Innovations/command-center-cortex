@@ -1,48 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCortexToken, cortexInit, cortexCall } from '@/lib/cortex/client';
 
-async function getToken() {
-  const refreshToken = process.env.M365_REFRESH_TOKEN;
-  const clientId = process.env.M365_CLIENT_ID;
-  const tenantId = process.env.M365_TENANT_ID;
-  if (!refreshToken || !clientId || !tenantId) throw new Error('M365 env vars missing');
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: clientId,
-      refresh_token: refreshToken,
-      scope: 'https://graph.microsoft.com/.default offline_access',
-    }),
-  });
-  const data = await res.json();
-  return data.access_token as string;
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { messageId } = await req.json();
-    if (!messageId) return NextResponse.json({ error: 'messageId required' }, { status: 400 });
-
-    const token = await getToken();
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-
-    // Move to junk
-    const moveRes = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages/${messageId}/move`,
-      { method: 'POST', headers, body: JSON.stringify({ destinationId: 'junkemail' }) }
-    );
-    if (!moveRes.ok) {
-      const err = await moveRes.text();
-      return NextResponse.json({ error: err }, { status: moveRes.status });
+    const cortexToken = getCortexToken(request);
+    if (!cortexToken) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const moved = await moveRes.json();
-    // Mark as read
-    await fetch(`https://graph.microsoft.com/v1.0/me/messages/${moved.id}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({ isRead: true }),
+    const { messageId } = await request.json();
+    if (!messageId) return NextResponse.json({ error: 'messageId required' }, { status: 400 });
+
+    const sessionId = await cortexInit(cortexToken);
+
+    // Cortex MCP doesn't have a "move to junk" tool directly.
+    // Best-effort: delete the email (removes it from inbox).
+    await cortexCall(cortexToken, sessionId, 'report-phish', 'm365__delete_email', {
+      message_id: messageId,
     });
 
     return NextResponse.json({ ok: true });
