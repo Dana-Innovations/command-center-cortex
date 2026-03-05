@@ -1,8 +1,11 @@
 "use client";
 import { SlackCard } from "@/components/command-center/SlackCard";
 import { AIFeedCard } from "@/components/command-center/AIFeedCard";
+import { JeanaSection } from "@/components/command-center/JeanaSection";
 import { EmailHygieneCard } from "@/components/command-center/EmailHygieneCard";
+import { useTasks } from "@/hooks/useTasks";
 import { useChats } from "@/hooks/useChats";
+import { transformJeanaItems } from "@/lib/transformers";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -70,6 +73,9 @@ function TeamsChatsCard() {
 }
 
 export function SignalsView() {
+  const { tasks } = useTasks();
+  const jeanaItems = transformJeanaItems(tasks);
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -78,6 +84,7 @@ export function SignalsView() {
       </div>
       <EmailHygieneCard />
       <AIFeedCard />
+      <JeanaSection items={jeanaItems} />
     </div>
   );
 }
