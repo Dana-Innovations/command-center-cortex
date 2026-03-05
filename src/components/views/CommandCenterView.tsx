@@ -11,6 +11,7 @@ import { PowerBIKPIs } from "@/components/command-center/PowerBIKPIs";
 import { PowerBIReports } from "@/components/command-center/PowerBIReports";
 import { MeetingPrep } from "@/components/command-center/MeetingPrep";
 import { OverdueTasks } from "@/components/command-center/OverdueTasks";
+import { useAuth } from "@/hooks/useAuth";
 import { useCalendar } from "@/hooks/useCalendar";
 import { useTasks } from "@/hooks/useTasks";
 import { useEmails } from "@/hooks/useEmails";
@@ -27,6 +28,7 @@ interface CommandCenterViewProps {
 }
 
 export function CommandCenterView({ onOpenPreferences }: CommandCenterViewProps) {
+  const { isAri } = useAuth();
   const { events: calEvents } = useCalendar();
   const { tasks } = useTasks();
   const { emails } = useEmails();
@@ -58,7 +60,7 @@ export function CommandCenterView({ onOpenPreferences }: CommandCenterViewProps)
       {/* ── Row 4: Meeting Prep + Jeana ─────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <MeetingPrep meetings={meetingPrep} />
-        <JeanaSection items={jeanaItems} />
+        {isAri && <JeanaSection items={jeanaItems} />}
       </div>
 
       {/* ── Row 5: AI Feed ──────────────────────────────────────────── */}

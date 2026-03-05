@@ -32,15 +32,6 @@ ChartJS.register(
 // Score distribution data - matches prototype
 const SCORE_BANDS = { "90-100": 4, "70-89": 8, "50-69": 7, "Below 50": 5 };
 
-const INSIGHTS = [
-  { color: "red", text: "ALL bookings at 59% on final day \u2014 Residential at 33% is the drag. Enterprise at 1%." },
-  { color: "green", text: "Commercial crushing at 125% and Professional at 221% \u2014 strong channel execution" },
-  { color: "red", text: "7 Asana tasks overdue > 30 days \u2014 consider bulk cleanup or reassignment" },
-  { color: "amber", text: "Meeting load today: 54% of day \u2014 heavier than your 40% weekly average" },
-  { color: "amber", text: "3 reply drafts pending > 7 days \u2014 Scott WRV, EP Wealth, NPI all awaiting response" },
-  { color: "green", text: "Jeana offered Cortex MCP for Claude \u2014 say yes, it's a quick AI tooling win" },
-];
-
 const chartTextColor = "#B8B8B8";
 const gridColor = "rgba(255,255,255,0.06)";
 
