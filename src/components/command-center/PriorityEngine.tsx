@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { PriorityItem } from "@/lib/types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SlackIcon } from "@/components/ui/icons";
+import { useAuth } from "@/hooks/useAuth";
 
 function SourceIcon({ source }: { source: PriorityItem["source"] }) {
   if (source === "email") return (
@@ -71,6 +72,7 @@ interface PriorityEngineProps {
 }
 
 export function PriorityEngine({ items = [], onJeana }: PriorityEngineProps) {
+  const { isAri } = useAuth();
   const [filter, setFilter] = useState<"all" | "email" | "asana" | "teams">("all");
   const [doneItems, setDoneItems] = useState<Set<string>>(new Set());
 
@@ -156,12 +158,14 @@ export function PriorityEngine({ items = [], onJeana }: PriorityEngineProps) {
                     Done
                   </button>
                 )}
-                <button
-                  className="text-xs px-2 py-1 rounded-md hover:bg-amber-400/10 text-text-muted hover:text-amber-400 transition-colors cursor-pointer"
-                  onClick={() => onJeana?.(item.title, item.source)}
-                >
-                  Jeana
-                </button>
+                {isAri && (
+                  <button
+                    className="text-xs px-2 py-1 rounded-md hover:bg-amber-400/10 text-text-muted hover:text-amber-400 transition-colors cursor-pointer"
+                    onClick={() => onJeana?.(item.title, item.source)}
+                  >
+                    Jeana
+                  </button>
+                )}
               </div>
             </div>
           ))}

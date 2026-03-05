@@ -199,4 +199,5 @@ export interface TonePreset {
   id: string;
   label: string;
   generate: (context: string) => string;
+  ariOnly?: boolean;
 }

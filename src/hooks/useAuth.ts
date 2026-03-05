@@ -50,5 +50,7 @@ export function useAuth() {
     form.submit();
   }, []);
 
-  return { user, loading, signOut };
+  const isAri = user?.email === "ari@sonance.com";
+
+  return { user, loading, signOut, isAri };
 }

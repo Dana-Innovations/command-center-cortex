@@ -59,8 +59,9 @@ export function ReplyCenter() {
   const { emails, loading: emailsLoading } = useEmails();
   const { tasks, loading: tasksLoading } = useTasks();
   const { chats, loading: chatsLoading } = useChats();
-  const { user } = useAuth();
+  const { user, isAri } = useAuth();
   const fullName = user?.user_metadata?.full_name ?? "";
+  const tonePresets = isAri ? TONE_PRESETS : TONE_PRESETS.filter(t => !t.ariOnly);
 
   const loading = emailsLoading || tasksLoading || chatsLoading;
 
@@ -334,7 +335,7 @@ export function ReplyCenter() {
 
                     {/* Tone buttons */}
                     <div className="flex flex-wrap gap-1 mt-2">
-                      {TONE_PRESETS.map(tone => (
+                      {tonePresets.map(tone => (
                         <button key={tone.id}
                           className={cn("text-[10px] px-2 py-1 rounded-md transition-all cursor-pointer border",
                             activeTones[item.id] === tone.id

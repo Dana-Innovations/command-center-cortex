@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_PRESETS } from "@/lib/constants";
+import { useAuth } from "@/hooks/useAuth";
 
 interface QuickReplyProps {
   isOpen: boolean;
@@ -29,8 +30,11 @@ export function QuickReply({
   context = "",
   url = "",
 }: QuickReplyProps) {
+  const { isAri } = useAuth();
   const [draft, setDraft] = useState("");
   const [activeTone, setActiveTone] = useState<string | null>(null);
+
+  const tonePresets = isAri ? TONE_PRESETS : TONE_PRESETS.filter(t => !t.ariOnly);
 
   if (!isOpen) return null;
 
@@ -76,7 +80,7 @@ export function QuickReply({
 
         {/* Tone presets */}
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {TONE_PRESETS.map((tone) => (
+          {tonePresets.map((tone) => (
             <button
               key={tone.id}
               className={cn(

@@ -73,6 +73,7 @@ function TeamsChatsCard() {
 }
 
 export function SignalsView() {
+  const { isAri } = useAuth();
   const { tasks } = useTasks();
   const jeanaItems = transformJeanaItems(tasks);
 
@@ -84,7 +85,7 @@ export function SignalsView() {
       </div>
       <EmailHygieneCard />
       <AIFeedCard />
-      <JeanaSection items={jeanaItems} />
+      {isAri && <JeanaSection items={jeanaItems} />}
     </div>
   );
 }

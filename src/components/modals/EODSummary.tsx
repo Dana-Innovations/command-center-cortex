@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface EODSummaryProps {
   isOpen: boolean;
@@ -58,6 +59,7 @@ Generated ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit"
 }
 
 export function EODSummary({ isOpen, onClose }: EODSummaryProps) {
+  const { isAri } = useAuth();
   const [summary, setSummary] = useState(() => generateSummary());
 
   if (!isOpen) return null;
@@ -99,12 +101,14 @@ export function EODSummary({ isOpen, onClose }: EODSummaryProps) {
           >
             Copy to Clipboard
           </button>
-          <button
-            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--bg-card-border)] text-text-muted hover:text-text-body transition-colors cursor-pointer"
-            onClick={onClose}
-          >
-            Send to Jeana
-          </button>
+          {isAri && (
+            <button
+              className="text-xs px-3 py-1.5 rounded-lg border border-[var(--bg-card-border)] text-text-muted hover:text-text-body transition-colors cursor-pointer"
+              onClick={onClose}
+            >
+              Send to Jeana
+            </button>
+          )}
         </div>
       </div>
     </div>

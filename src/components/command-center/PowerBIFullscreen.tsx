@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Scissors, Send, Upload, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChats } from "@/hooks/useChats";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Destination {
   type: "teams_chat" | "teams_person" | "email";
@@ -30,6 +31,7 @@ const KNOWN_CONTACTS = [
 
 export function PowerBIFullscreen({ reportName, embedUrl, onClose }: Props) {
   const { chats } = useChats();
+  const { isAri } = useAuth();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -166,12 +168,13 @@ export function PowerBIFullscreen({ reportName, embedUrl, onClose }: Props) {
   }
 
   // Build destination list: Teams chats + known contacts (email)
+  const contacts = isAri ? KNOWN_CONTACTS : KNOWN_CONTACTS.filter(c => c.address !== "jeanac@sonance.com");
   const destinations: Destination[] = [
     ...chats
       .filter(c => c.topic)
       .map(c => ({ type: "teams_chat" as const, id: c.id, name: c.topic || "Teams Chat" })),
-    ...KNOWN_CONTACTS.map(c => ({ type: "teams_person" as const, name: c.name, address: c.address })),
-    ...KNOWN_CONTACTS.map(c => ({ type: "email" as const, name: c.name, address: c.address })),
+    ...contacts.map(c => ({ type: "teams_person" as const, name: c.name, address: c.address })),
+    ...contacts.map(c => ({ type: "email" as const, name: c.name, address: c.address })),
   ];
 
   const filtered = destinations.filter(d =>

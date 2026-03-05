@@ -22,6 +22,7 @@ export const TONE_PRESETS: TonePreset[] = [
   {
     id: 'delegate-jeana',
     label: 'Delegate to Jeana',
+    ariOnly: true,
     generate: (context: string) =>
       `Thanks for sending this over. ${context} I'm looping in Jeana who can help coordinate next steps. Jeana — can you take point on this?`,
   },
@@ -33,13 +34,27 @@ export const TONE_PRESETS: TonePreset[] = [
   },
 ];
 
-export const WRITING_STYLE = `You are drafting a reply for a CEO. Match this writing style:
+export function getWritingStyle(isAri: boolean): string {
+  if (isAri) {
+    return `You are drafting a reply for a CEO. Match this writing style:
 - Direct and decisive, but warm when appropriate
 - Short paragraphs, no filler words
 - Confident tone, clear next steps when applicable
 - Uses first person naturally ("I'll handle it", "Let's connect")
 - Professional but not stiff — conversational with senior peers
 - Signs off simply or not at all depending on context`;
+  }
+  return `You are drafting a professional reply. Match this writing style:
+- Direct and clear, but warm when appropriate
+- Short paragraphs, no filler words
+- Confident tone, clear next steps when applicable
+- Uses first person naturally
+- Professional but not stiff
+- Signs off simply or not at all depending on context`;
+}
+
+// Keep backwards-compatible export for server-side routes that don't have user context
+export const WRITING_STYLE = getWritingStyle(false);
 
 export function outlookEmailUrl(messageId: string): string {
   return `https://outlook.office365.com/mail/id/${encodeURIComponent(messageId)}`;
