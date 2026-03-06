@@ -1,31 +1,49 @@
 # Command Center
 
-Next.js app — executive dashboard that aggregates email, calendar, tasks, chats, Slack, Salesforce, and Power BI via Cortex MCP.
+Next.js 15 executive dashboard. Aggregates email, calendar, tasks, chats, Slack, Salesforce, and Power BI via Cortex MCP.
 
-## Critical Rules
+## Commands
 
-- **DO NOT modify authentication.** Cortex OAuth (PKCE flow) is fully implemented in `src/middleware.ts`, `src/lib/cortex/auth.ts`, and `src/app/auth/cortex/callback/route.ts`. Do not touch these files unless explicitly asked.
-- **No hardcoded user data.** All user-specific content must come from the authenticated Cortex user. Never hardcode names, emails, or demo data.
-- **All external data flows through Cortex MCP.** Use `callCortexMCP()` or `cortexCall()` from `src/lib/cortex/client.ts` with the user's token. Do not add direct API keys or bypass Cortex.
-- **Ari-specific features must be gated.** Features like Jeana and CEO tone are behind an `isAri` check. Follow this pattern for any user-specific features.
+```bash
+npm install            # install dependencies
+vercel env pull .env.local  # pull env vars (REQUIRED before first run)
+npm run dev            # start dev server on :3000
+npm run build          # production build
+npm run lint           # run linter
+```
+
+## DO NOT TOUCH — Protected Files
+
+These files implement Cortex OAuth (PKCE) and MUST NOT be modified unless explicitly asked:
+
+- `src/middleware.ts`
+- `src/lib/cortex/auth.ts`
+- `src/app/auth/cortex/callback/route.ts`
+- `src/lib/cortex/pkce.ts`
+
+## MUST Rules
+
+- All user-specific content MUST come from the authenticated Cortex user. NEVER hardcode names, emails, user IDs, or demo data.
+- All external data MUST flow through `callCortexMCP()` or `cortexCall()` in `src/lib/cortex/client.ts` using the user's token. MUST NOT add direct API keys or bypass Cortex.
+- User-specific features (e.g. Jeana, CEO tone) MUST be gated behind `isAri` or a similar authenticated user check. MUST NOT make them globally visible.
+- Supabase schema changes MUST use a new migration file in `supabase/migrations/`. MUST NOT modify existing migration files.
+- All new Supabase tables MUST have RLS enabled, `updated_at` triggers, and indexes — follow the patterns in `supabase/migrations/20260305_setup_schema.sql`.
 
 ## Architecture
 
-- **Auth:** Cortex OAuth2 PKCE → cookies (`cortex_access_token`, `cortex_user`) → middleware validates & forwards token
+- **Auth:** Cortex OAuth2 PKCE → cookies (`cortex_access_token`, `cortex_user`) → middleware validates & forwards token via `x-cortex-token` header
 - **Data:** Sync routes (`src/app/api/sync/*`) call Cortex MCP → upsert to Supabase
-- **Supabase:** User profiles + 11 data tables. Schema in `supabase/migrations/`. New changes require new migration files — do not modify existing ones.
+- **Supabase:** 12 tables with RLS. Schema in `supabase/migrations/`
 - **Types:** All table interfaces in `src/lib/types.ts`
-
-## Setup
-
-```bash
-npm install
-vercel env pull .env.local
-npm run dev
-```
+- **Connections:** `src/lib/cortex/connections.ts` checks which services a user has connected before fetching
 
 ## Supabase Tables
 
 `user_profiles`, `emails`, `calendar_events`, `tasks`, `chats`, `teams_channels`, `slack_feed`, `salesforce_opportunities`, `salesforce_reports`, `sync_log`, `action_queue`, `audit_log`
 
-All tables have RLS enabled, `updated_at` triggers, and proper indexes following Cortex patterns.
+## Common Mistakes to Avoid
+
+- Adding `ANTHROPIC_API_KEY`, `SLACK_TOKEN`, or any direct service API key — everything goes through Cortex
+- Spreading user data into components without checking the authenticated user first
+- Modifying auth cookies or middleware token forwarding logic
+- Creating Supabase tables via the dashboard instead of migration files
