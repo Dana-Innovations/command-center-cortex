@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface CortexUser {
   sub: string;
@@ -21,23 +21,26 @@ function getCortexUserFromCookie(): CortexUser | null {
 }
 
 export function useAuth() {
-  const [user] = useState<{
+  const [user, setUser] = useState<{
     email: string;
     user_metadata: { full_name: string; avatar_url?: string };
-  } | null>(() => {
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
     const cortexUser = getCortexUserFromCookie();
     if (cortexUser) {
-      return {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- must read cookie on client after hydration
+      setUser({
         email: cortexUser.email,
         user_metadata: {
           full_name: cortexUser.name,
           avatar_url: cortexUser.picture,
         },
-      };
+      });
     }
-    return null;
-  });
-  const loading = false;
+    setLoading(false);
+  }, []);
 
   const signOut = useCallback(async () => {
     // POST to signout route which clears cookies and revokes token
