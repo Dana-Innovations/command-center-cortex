@@ -38,9 +38,161 @@ export interface ReplyQueueItem {
   sortTime: number;
   score: number;
   displayScore: number;
+  scoreBreakdown: ReplyScoreBreakdownItem[];
   prioritySignals: ReplyPrioritySignals;
   priorityReasons: string[];
 }
+
+export interface ReplyScoreBreakdownItem {
+  key: string;
+  label: string;
+  raw: number;
+  weight: number;
+  points: number;
+}
+
+export interface ReplyPriorityPreferences {
+  sourceWeights: Record<ReplySource, number>;
+  factorWeights: {
+    unread: number;
+    recency: number;
+    urgency: number;
+    aging: number;
+    peopleWaiting: number;
+    financial: number;
+    legal: number;
+    responsibility: number;
+    engagement: number;
+  };
+}
+
+export type ReplyPriorityFactorKey =
+  keyof ReplyPriorityPreferences["factorWeights"];
+
+export const REPLY_PRIORITY_SOURCE_CONTROLS = [
+  {
+    key: "email" as const,
+    label: "Email",
+    description: "How strongly inbox messages should rise in the queue.",
+  },
+  {
+    key: "teams" as const,
+    label: "Teams",
+    description: "How much active chat threads should outrank other work.",
+  },
+  {
+    key: "slack_context" as const,
+    label: "Slack",
+    description: "How much high-context Slack threads should matter.",
+  },
+  {
+    key: "asana_comment" as const,
+    label: "Asana",
+    description: "How much task comments and follow-ups should surface.",
+  },
+] satisfies Array<{
+  key: ReplySource;
+  label: string;
+  description: string;
+}>;
+
+export const REPLY_PRIORITY_FACTOR_CONTROLS = [
+  {
+    key: "recency" as const,
+    label: "Recency",
+    description: "Favor fresh messages and comments over older context.",
+  },
+  {
+    key: "urgency" as const,
+    label: "Urgency",
+    description: "Boost items with explicit urgent language.",
+  },
+  {
+    key: "unread" as const,
+    label: "Unread",
+    description: "Push unopened email toward the top.",
+  },
+  {
+    key: "aging" as const,
+    label: "Aging",
+    description: "Escalate items that have been waiting on you.",
+  },
+  {
+    key: "peopleWaiting" as const,
+    label: "People Waiting",
+    description: "Raise threads where multiple people are involved.",
+  },
+  {
+    key: "responsibility" as const,
+    label: "Ownership",
+    description: "Boost items where you are clearly responsible.",
+  },
+  {
+    key: "financial" as const,
+    label: "Financial",
+    description: "Raise budget, payment, contract, and pricing topics.",
+  },
+  {
+    key: "legal" as const,
+    label: "Legal",
+    description: "Raise legal, compliance, and counsel-related topics.",
+  },
+  {
+    key: "engagement" as const,
+    label: "Engagement",
+    description: "Favor attachments, files, reactions, and thread activity.",
+  },
+] satisfies Array<{
+  key: ReplyPriorityFactorKey;
+  label: string;
+  description: string;
+}>;
+
+const DEFAULT_SOURCE_WEIGHTS: ReplyPriorityPreferences["sourceWeights"] = {
+  email: 1,
+  teams: 1,
+  slack_context: 1,
+  asana_comment: 1,
+};
+
+const DEFAULT_FACTOR_WEIGHTS: ReplyPriorityPreferences["factorWeights"] = {
+  unread: 1,
+  recency: 1,
+  urgency: 1,
+  aging: 1,
+  peopleWaiting: 1,
+  financial: 1,
+  legal: 1,
+  responsibility: 1,
+  engagement: 1,
+};
+
+export const DEFAULT_REPLY_PRIORITY_PREFERENCES: ReplyPriorityPreferences = {
+  sourceWeights: DEFAULT_SOURCE_WEIGHTS,
+  factorWeights: DEFAULT_FACTOR_WEIGHTS,
+};
+
+const SOURCE_BASE_POINTS: Record<ReplySource, number> = {
+  email: 28,
+  teams: 42,
+  slack_context: 20,
+  asana_comment: 26,
+};
+
+const FACTOR_LABELS: Record<ReplyPriorityFactorKey, string> = {
+  unread: "Unread",
+  recency: "Recency",
+  urgency: "Urgency",
+  aging: "Aging",
+  peopleWaiting: "People waiting",
+  financial: "Financial",
+  legal: "Legal",
+  responsibility: "Ownership",
+  engagement: "Engagement",
+};
+
+const MIN_WEIGHT = 0;
+const MAX_WEIGHT = 2;
 
 const EMAIL_NOISE =
   /noreply|no-reply|newsletter|marketing|notification|donotreply|mailer|linkedin|twitter|digest|promo|offer|deal|vercel\.com|github\.com/i;
@@ -74,6 +226,111 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function clampWeight(value: number): number {
+  return Math.max(MIN_WEIGHT, Math.min(MAX_WEIGHT, value));
+}
+
+function safeWeight(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clampWeight(value)
+    : fallback;
+}
+
+export function createDefaultReplyPriorityPreferences(): ReplyPriorityPreferences {
+  return {
+    sourceWeights: { ...DEFAULT_SOURCE_WEIGHTS },
+    factorWeights: { ...DEFAULT_FACTOR_WEIGHTS },
+  };
+}
+
+export function mergeReplyPriorityPreferences(
+  value: unknown
+): ReplyPriorityPreferences {
+  const defaults = createDefaultReplyPriorityPreferences();
+  if (!value || typeof value !== "object") {
+    return defaults;
+  }
+
+  const record = value as {
+    sourceWeights?: Partial<Record<ReplySource, number>>;
+    factorWeights?: Partial<Record<ReplyPriorityFactorKey, number>>;
+  };
+
+  return {
+    sourceWeights: {
+      email: safeWeight(record.sourceWeights?.email, defaults.sourceWeights.email),
+      teams: safeWeight(record.sourceWeights?.teams, defaults.sourceWeights.teams),
+      slack_context: safeWeight(
+        record.sourceWeights?.slack_context,
+        defaults.sourceWeights.slack_context
+      ),
+      asana_comment: safeWeight(
+        record.sourceWeights?.asana_comment,
+        defaults.sourceWeights.asana_comment
+      ),
+    },
+    factorWeights: {
+      unread: safeWeight(
+        record.factorWeights?.unread,
+        defaults.factorWeights.unread
+      ),
+      recency: safeWeight(
+        record.factorWeights?.recency,
+        defaults.factorWeights.recency
+      ),
+      urgency: safeWeight(
+        record.factorWeights?.urgency,
+        defaults.factorWeights.urgency
+      ),
+      aging: safeWeight(
+        record.factorWeights?.aging,
+        defaults.factorWeights.aging
+      ),
+      peopleWaiting: safeWeight(
+        record.factorWeights?.peopleWaiting,
+        defaults.factorWeights.peopleWaiting
+      ),
+      financial: safeWeight(
+        record.factorWeights?.financial,
+        defaults.factorWeights.financial
+      ),
+      legal: safeWeight(
+        record.factorWeights?.legal,
+        defaults.factorWeights.legal
+      ),
+      responsibility: safeWeight(
+        record.factorWeights?.responsibility,
+        defaults.factorWeights.responsibility
+      ),
+      engagement: safeWeight(
+        record.factorWeights?.engagement,
+        defaults.factorWeights.engagement
+      ),
+    },
+  };
+}
+
+export function hasCustomizedReplyPriorityPreferences(
+  preferences: ReplyPriorityPreferences
+): boolean {
+  const defaults = DEFAULT_REPLY_PRIORITY_PREFERENCES;
+
+  return (
+    Object.entries(preferences.sourceWeights).some(
+      ([key, value]) =>
+        value !== defaults.sourceWeights[key as ReplySource]
+    ) ||
+    Object.entries(preferences.factorWeights).some(
+      ([key, value]) =>
+        value !== defaults.factorWeights[key as ReplyPriorityFactorKey]
+    )
+  );
+}
+
+export function formatPriorityWeight(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
 function detectContentFlags(value: string) {
   return {
     urgent: URGENT_RE.test(value),
@@ -87,6 +344,84 @@ function ageInHours(iso: string): number {
     0,
     (Date.now() - new Date(iso || Date.now()).getTime()) / (1000 * 60 * 60)
   );
+}
+
+interface ReplyScoreMetrics {
+  source: ReplySource;
+  unread?: number;
+  recency?: number;
+  urgency?: number;
+  aging?: number;
+  peopleWaiting?: number;
+  financial?: number;
+  legal?: number;
+  responsibility?: number;
+  engagement?: number;
+}
+
+function buildContribution(
+  key: string,
+  label: string,
+  raw: number,
+  weight: number
+): ReplyScoreBreakdownItem | null {
+  if (raw <= 0 || weight <= 0) {
+    return null;
+  }
+
+  const points = Math.round(raw * weight);
+  if (points <= 0) {
+    return null;
+  }
+
+  return {
+    key,
+    label,
+    raw,
+    weight,
+    points,
+  };
+}
+
+function scoreMetrics(
+  metrics: ReplyScoreMetrics,
+  preferences: ReplyPriorityPreferences
+) {
+  const breakdown: ReplyScoreBreakdownItem[] = [];
+
+  const sourceContribution = buildContribution(
+    `source:${metrics.source}`,
+    REPLY_PRIORITY_SOURCE_CONTROLS.find(
+      (control) => control.key === metrics.source
+    )?.label || "Source",
+    SOURCE_BASE_POINTS[metrics.source],
+    preferences.sourceWeights[metrics.source]
+  );
+  if (sourceContribution) {
+    breakdown.push(sourceContribution);
+  }
+
+  for (const key of Object.keys(
+    preferences.factorWeights
+  ) as ReplyPriorityFactorKey[]) {
+    const raw = metrics[key] ?? 0;
+    const contribution = buildContribution(
+      `factor:${key}`,
+      FACTOR_LABELS[key],
+      raw,
+      preferences.factorWeights[key]
+    );
+    if (contribution) {
+      breakdown.push(contribution);
+    }
+  }
+
+  const total = breakdown.reduce((sum, item) => sum + item.points, 0);
+
+  return {
+    score: clampScore(total),
+    breakdown: breakdown.sort((a, b) => b.points - a.points),
+  };
 }
 
 function isGroupConversation(chat: Chat): boolean {
@@ -156,7 +491,11 @@ export function buildOutlookComposeUrl({
   return `https://outlook.office365.com/mail/deeplink/compose?${params.toString()}`;
 }
 
-function scoreEmail(email: Email, flags: ReturnType<typeof detectContentFlags>) {
+function scoreEmail(
+  email: Email,
+  flags: ReturnType<typeof detectContentFlags>,
+  preferences: ReplyPriorityPreferences
+) {
   const daysAgo = Math.max(
     0,
     Math.floor(
@@ -165,53 +504,70 @@ function scoreEmail(email: Email, flags: ReturnType<typeof detectContentFlags>) 
     )
   );
 
-  let score = 28;
-  score += !email.is_read ? 22 : 8;
-  score += daysAgo === 0 ? 18 : daysAgo === 1 ? 12 : daysAgo <= 3 ? 6 : 2;
-  score += Math.min(email.days_overdue * 6, 18);
-  if (email.has_attachments) score += 4;
-  if (flags.urgent) score += 18;
-  if (flags.financial) score += 10;
-  if (flags.legal) score += 12;
-
-  return clampScore(score);
+  return scoreMetrics(
+    {
+      source: "email",
+      unread: !email.is_read ? 22 : 0,
+      recency:
+        daysAgo === 0 ? 18 : daysAgo === 1 ? 12 : daysAgo <= 3 ? 6 : 2,
+      aging: Math.min(email.days_overdue * 6, 18),
+      engagement: email.has_attachments ? 4 : 0,
+      urgency: flags.urgent ? 18 : 0,
+      financial: flags.financial ? 10 : 0,
+      legal: flags.legal ? 12 : 0,
+    },
+    preferences
+  );
 }
 
-function scoreTeams(chat: Chat, flags: ReturnType<typeof detectContentFlags>) {
+function scoreTeams(
+  chat: Chat,
+  flags: ReturnType<typeof detectContentFlags>,
+  preferences: ReplyPriorityPreferences
+) {
   const hours = ageInHours(chat.last_activity);
   const groupConversation = isGroupConversation(chat);
 
-  let score = 42;
-  score += hours <= 4 ? 18 : hours <= 24 ? 12 : hours <= 72 ? 6 : 2;
-  if (groupConversation) score += 10;
-  if (flags.urgent) score += 14;
-  if (flags.financial) score += 8;
-  if (flags.legal) score += 10;
-
-  return clampScore(score);
+  return scoreMetrics(
+    {
+      source: "teams",
+      recency: hours <= 4 ? 18 : hours <= 24 ? 12 : hours <= 72 ? 6 : 2,
+      peopleWaiting: groupConversation ? 10 : 0,
+      urgency: flags.urgent ? 14 : 0,
+      financial: flags.financial ? 8 : 0,
+      legal: flags.legal ? 10 : 0,
+    },
+    preferences
+  );
 }
 
 function scoreSlack(
   message: SlackFeedMessage,
-  flags: ReturnType<typeof detectContentFlags>
+  flags: ReturnType<typeof detectContentFlags>,
+  preferences: ReplyPriorityPreferences
 ) {
   const hours = ageInHours(message.timestamp);
 
-  let score = 20;
-  score += hours <= 6 ? 10 : hours <= 24 ? 6 : hours <= 72 ? 3 : 0;
-  score += Math.min(message.thread_reply_count * 2, 10);
-  if (message.has_files) score += 6;
-  if ((message.reactions ?? []).length > 0) score += 4;
-  if (flags.urgent) score += 12;
-  if (flags.financial) score += 6;
-  if (flags.legal) score += 8;
-
-  return clampScore(score);
+  return scoreMetrics(
+    {
+      source: "slack_context",
+      recency: hours <= 6 ? 10 : hours <= 24 ? 6 : hours <= 72 ? 3 : 0,
+      peopleWaiting: Math.min(message.thread_reply_count * 2, 10),
+      engagement:
+        (message.has_files ? 6 : 0) +
+        ((message.reactions ?? []).length > 0 ? 4 : 0),
+      urgency: flags.urgent ? 12 : 0,
+      financial: flags.financial ? 6 : 0,
+      legal: flags.legal ? 8 : 0,
+    },
+    preferences
+  );
 }
 
 function scoreAsana(
   thread: AsanaCommentThread,
-  flags: ReturnType<typeof detectContentFlags>
+  flags: ReturnType<typeof detectContentFlags>,
+  preferences: ReplyPriorityPreferences
 ) {
   const hours = ageInHours(thread.latest_comment_at);
   const relevanceWeight = {
@@ -222,15 +578,18 @@ function scoreAsana(
     creator: 6,
   }[thread.relevance_reason];
 
-  let score = 26;
-  score += hours <= 8 ? 12 : hours <= 24 ? 8 : hours <= 72 ? 4 : 1;
-  score += relevanceWeight;
-  if (thread.participant_names.length > 2) score += 6;
-  if (flags.urgent) score += 12;
-  if (flags.financial) score += 6;
-  if (flags.legal) score += 8;
-
-  return clampScore(score);
+  return scoreMetrics(
+    {
+      source: "asana_comment",
+      recency: hours <= 8 ? 12 : hours <= 24 ? 8 : hours <= 72 ? 4 : 1,
+      responsibility: relevanceWeight,
+      peopleWaiting: thread.participant_names.length > 2 ? 6 : 0,
+      urgency: flags.urgent ? 12 : 0,
+      financial: flags.financial ? 6 : 0,
+      legal: flags.legal ? 8 : 0,
+    },
+    preferences
+  );
 }
 
 function buildEmailPriorityReasons(
@@ -349,12 +708,14 @@ export function buildReplyQueue({
   slackMessages,
   asanaComments,
   currentUserName,
+  preferences = DEFAULT_REPLY_PRIORITY_PREFERENCES,
 }: {
   emails: Email[];
   chats: Chat[];
   slackMessages: SlackFeedMessage[];
   asanaComments: AsanaCommentThread[];
   currentUserName: string;
+  preferences?: ReplyPriorityPreferences;
 }): ReplyQueueItem[] {
   const currentUser = normalize(currentUserName);
   const items: ReplyQueueItem[] = [];
@@ -405,7 +766,7 @@ export function buildReplyQueue({
     if (!email.is_read) tags.push("Unread");
     if (email.has_attachments) tags.push("Attachments");
     if (email.days_overdue > 0) tags.push("Aging");
-    const score = scoreEmail(email, flags);
+    const scoreResult = scoreEmail(email, flags, preferences);
 
     items.push({
       id: `email:${email.message_id || email.id}`,
@@ -422,8 +783,9 @@ export function buildReplyQueue({
       tags,
       meta: formatRelativeTime(email.received_at),
       sortTime: new Date(email.received_at).getTime(),
-      score,
-      displayScore: score,
+      score: scoreResult.score,
+      displayScore: scoreResult.score,
+      scoreBreakdown: scoreResult.breakdown,
       prioritySignals: buildSignals(flags, {
         aging: email.days_overdue > 0,
         recent: daysAgo <= 1,
@@ -456,7 +818,7 @@ export function buildReplyQueue({
     const flags = detectContentFlags(`${title} ${preview}`);
     const url = chat.web_url || buildTeamsChatUrl(chat.chat_id || chat.id);
     const groupConversation = isGroupConversation(chat);
-    const score = scoreTeams(chat, flags);
+    const scoreResult = scoreTeams(chat, flags, preferences);
 
     items.push({
       id: `teams:${chat.id}`,
@@ -467,12 +829,13 @@ export function buildReplyQueue({
       message: chat.last_message_preview || preview,
       timestamp: chat.last_activity,
       url,
-      unread: true,
+      unread: false,
       tags: groupConversation ? ["Group thread"] : ["Recent"],
       meta: `Teams · ${formatRelativeTime(chat.last_activity)}`,
       sortTime: new Date(chat.last_activity).getTime(),
-      score,
-      displayScore: score,
+      score: scoreResult.score,
+      displayScore: scoreResult.score,
+      scoreBreakdown: scoreResult.breakdown,
       prioritySignals: buildSignals(flags, {
         multiplePeopleWaiting: groupConversation,
         recent: ageInHours(chat.last_activity) <= 24,
@@ -497,7 +860,7 @@ export function buildReplyQueue({
     const flags = detectContentFlags(
       `${message.channel_name} ${message.author_name} ${preview}`
     );
-    const score = scoreSlack(message, flags);
+    const scoreResult = scoreSlack(message, flags, preferences);
 
     items.push({
       id: `slack:${message.id}`,
@@ -515,8 +878,9 @@ export function buildReplyQueue({
       tags: getSlackTags(message),
       meta: `#${message.channel_name} · ${formatRelativeTime(message.timestamp)}`,
       sortTime: new Date(message.timestamp).getTime(),
-      score,
-      displayScore: score,
+      score: scoreResult.score,
+      displayScore: scoreResult.score,
+      scoreBreakdown: scoreResult.breakdown,
       prioritySignals: buildSignals(flags, {
         multiplePeopleWaiting: message.thread_reply_count > 2,
         recent: ageInHours(message.timestamp) <= 24,
@@ -528,7 +892,7 @@ export function buildReplyQueue({
   for (const thread of asanaComments) {
     const summary = truncate(thread.latest_comment_text, 180);
     const flags = detectContentFlags(`${thread.task_name} ${summary}`);
-    const score = scoreAsana(thread, flags);
+    const scoreResult = scoreAsana(thread, flags, preferences);
 
     items.push({
       id: `asana:${thread.id}`,
@@ -540,13 +904,14 @@ export function buildReplyQueue({
       message: thread.latest_comment_text,
       timestamp: thread.latest_comment_at,
       url: thread.permalink_url,
-      unread: true,
+      unread: false,
       tags: ["Comment", thread.relevance_reason.replace("_", " ")],
       meta: `${thread.project_name} · ${formatRelativeTime(thread.latest_comment_at)}`,
       projectName: thread.project_name,
       sortTime: new Date(thread.latest_comment_at).getTime(),
-      score,
-      displayScore: score,
+      score: scoreResult.score,
+      displayScore: scoreResult.score,
+      scoreBreakdown: scoreResult.breakdown,
       prioritySignals: buildSignals(flags, {
         multiplePeopleWaiting: thread.participant_names.length > 2,
         recent: ageInHours(thread.latest_comment_at) <= 24,

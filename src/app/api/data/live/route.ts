@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCortexToken, cortexInit, cortexCall } from "@/lib/cortex/client";
 import { getConnections, type CortexConnection } from "@/lib/cortex/connections";
+import { normalizeCalendarDateTime } from "@/lib/calendar";
 import type { AsanaCommentThread, Task } from "@/lib/types";
 
 const CORTEX_URL = process.env.NEXT_PUBLIC_CORTEX_URL ?? "";
@@ -409,33 +410,48 @@ async function fetchCalendar(token: string, sessionId: string) {
   const events: Record<string, unknown>[] = result.events ?? result.value ?? [];
   const synced = new Date().toISOString();
 
-  return events.map((e) => {
-    const start = e.start as { dateTime?: string } | null;
-    const endTime = e.end as { dateTime?: string } | null;
-    const loc = e.location as { displayName?: string } | null;
-    const organizer = e.organizer as {
-      emailAddress?: { name?: string };
-    } | null;
-    const startDt = start?.dateTime || (e.startDateTime as string) || "";
-    const endDt = endTime?.dateTime || (e.endDateTime as string) || "";
-    return {
-      id: e.id,
-      event_id: e.id,
-      subject: e.subject || "(no title)",
-      location: loc?.displayName || (e.location as string) || "",
-      start_time: startDt.endsWith("Z") ? startDt : startDt + "Z",
-      end_time: endDt.endsWith("Z") ? endDt : endDt + "Z",
-      is_all_day:
-        startDt?.endsWith("T00:00:00.0000000") &&
-        endDt?.endsWith("T00:00:00.0000000"),
-      organizer: organizer?.emailAddress?.name || "",
-      is_online: e.isOnlineMeeting as boolean,
-      join_url:
-        (e.onlineMeetingUrl as string) || (e.webLink as string) || "",
-      outlook_url: (e.webLink as string) || "",
-      synced_at: synced,
-    };
-  });
+  return events
+    .map((e) => {
+      const start = e.start as { dateTime?: string } | null;
+      const endTime = e.end as { dateTime?: string } | null;
+      const loc = e.location as { displayName?: string } | null;
+      const organizer = e.organizer as {
+        emailAddress?: { name?: string };
+      } | null;
+      const startDt =
+        typeof e.start === "string"
+          ? e.start
+          : start?.dateTime || (e.startDateTime as string) || "";
+      const endDt =
+        typeof e.end === "string"
+          ? e.end
+          : endTime?.dateTime || (e.endDateTime as string) || "";
+      const normalizedStart = normalizeCalendarDateTime(startDt);
+      const normalizedEnd = normalizeCalendarDateTime(endDt);
+
+      if (!normalizedStart || !normalizedEnd) {
+        return null;
+      }
+
+      return {
+        id: e.id,
+        event_id: e.id,
+        subject: e.subject || "(no title)",
+        location: loc?.displayName || (e.location as string) || "",
+        start_time: normalizedStart,
+        end_time: normalizedEnd,
+        is_all_day:
+          Boolean(e.isAllDay) ||
+          (startDt.includes("T00:00:00") && endDt.includes("T00:00:00")),
+        organizer: organizer?.emailAddress?.name || "",
+        is_online: e.isOnlineMeeting as boolean,
+        join_url:
+          (e.onlineMeetingUrl as string) || (e.webLink as string) || "",
+        outlook_url: (e.webLink as string) || "",
+        synced_at: synced,
+      };
+    })
+    .filter((event): event is NonNullable<typeof event> => event !== null);
 }
 
 // ─── Asana via Cortex MCP ─────────────────────────────────────────────────

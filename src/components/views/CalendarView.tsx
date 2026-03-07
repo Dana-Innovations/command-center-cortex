@@ -3,18 +3,19 @@ import { useState, useEffect, useMemo } from "react";
 import { MeetingPrep } from "@/components/command-center/MeetingPrep";
 import { WeatherCard } from "@/components/command-center/WeatherCard";
 import { useCalendar } from "@/hooks/useCalendar";
+import { parseCalendarDate, toPacificDate } from "@/lib/calendar";
 import { transformMeetingPrep } from "@/lib/transformers";
 import { CalendarEvent } from "@/lib/types";
-
-function toPST(iso: string): Date {
-  return new Date(new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
-}
 
 function nowPST(): Date {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
 }
 
-function formatTime12(d: Date): string {
+function formatTime12(d: Date | null): string {
+  if (!d) {
+    return "Time TBD";
+  }
+
   const h = d.getHours();
   const m = d.getMinutes();
   const period = h >= 12 ? "PM" : "AM";
@@ -23,7 +24,7 @@ function formatTime12(d: Date): string {
 }
 
 function formatTimeRange(ev: CalendarEvent): string {
-  return `${formatTime12(toPST(ev.start_time))} \u2013 ${formatTime12(toPST(ev.end_time))}`;
+  return `${formatTime12(toPacificDate(ev.start_time))} \u2013 ${formatTime12(toPacificDate(ev.end_time))}`;
 }
 
 function isSameDay(d1: Date, d2: Date): boolean {
@@ -42,9 +43,9 @@ function NowMarker() {
 }
 
 function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
-  const start = toPST(ev.start_time);
-  const end = toPST(ev.end_time);
-  const isHappening = start <= now && now < end;
+  const start = toPacificDate(ev.start_time);
+  const end = toPacificDate(ev.end_time);
+  const isHappening = Boolean(start && end && start <= now && now < end);
 
   return (
     <div className={`glass-card p-3 flex items-start gap-3 ${isHappening ? "border border-accent-amber/60 shadow-[0_0_12px_rgba(212,164,76,0.15)]" : ""}`}>
@@ -83,15 +84,26 @@ export function CalendarView() {
   }, []);
 
   const { todayAllDay, todayTimed, upcoming } = useMemo(() => {
-    const sorted = [...calEvents].sort(
-      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-    );
+    const sorted = [...calEvents]
+      .filter(
+        (event) =>
+          parseCalendarDate(event.start_time) && parseCalendarDate(event.end_time)
+      )
+      .sort(
+        (a, b) =>
+          parseCalendarDate(a.start_time)!.getTime() -
+          parseCalendarDate(b.start_time)!.getTime()
+      );
     const todayAllDay: CalendarEvent[] = [];
     const todayTimed: CalendarEvent[] = [];
     const upcoming: CalendarEvent[] = [];
 
     for (const ev of sorted) {
-      const start = toPST(ev.start_time);
+      const start = toPacificDate(ev.start_time);
+      if (!start) {
+        continue;
+      }
+
       if (isSameDay(start, now)) {
         if (ev.is_all_day) todayAllDay.push(ev);
         else todayTimed.push(ev);
@@ -105,7 +117,8 @@ export function CalendarView() {
   // NOW marker: insert before the first event whose start_time > now
   const nowInsertBefore = useMemo(() => {
     for (let i = 0; i < todayTimed.length; i++) {
-      if (toPST(todayTimed[i].start_time) > now) return i;
+      const start = toPacificDate(todayTimed[i].start_time);
+      if (start && start > now) return i;
     }
     return todayTimed.length;
   }, [todayTimed, now]);
@@ -169,7 +182,11 @@ export function CalendarView() {
             {(() => {
               const grouped: { label: string; events: typeof upcoming }[] = [];
               for (const ev of upcoming.slice(0, 10)) {
-                const start = toPST(ev.start_time);
+                const start = toPacificDate(ev.start_time);
+                if (!start) {
+                  continue;
+                }
+
                 const label = start.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
                 const last = grouped[grouped.length - 1];
                 if (last && last.label === label) {

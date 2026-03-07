@@ -14,7 +14,15 @@ import type { EmailDetail } from "@/lib/email-reply";
 import {
   buildOutlookComposeUrl,
   buildReplyQueue,
+  createDefaultReplyPriorityPreferences,
+  formatPriorityWeight,
   formatRelativeTime,
+  hasCustomizedReplyPriorityPreferences,
+  mergeReplyPriorityPreferences,
+  REPLY_PRIORITY_FACTOR_CONTROLS,
+  REPLY_PRIORITY_SOURCE_CONTROLS,
+  type ReplyPriorityFactorKey,
+  type ReplyPriorityPreferences,
   type ReplyQueueItem,
   type ReplySource,
 } from "@/lib/reply-center";
@@ -25,6 +33,7 @@ type ComposerMode = "draft" | "ai";
 interface StoredReplyState {
   dismissedIds: string[];
   snoozedUntil: Record<string, number>;
+  preferences: ReplyPriorityPreferences;
 }
 
 const FILTER_LABELS: Record<FilterId, string> = {
@@ -124,6 +133,7 @@ const QUICK_PROMPTS: Record<
 const EMPTY_REPLY_STATE: StoredReplyState = {
   dismissedIds: [],
   snoozedUntil: {},
+  preferences: createDefaultReplyPriorityPreferences(),
 };
 
 const SNOOZE_MS = 12 * 60 * 60 * 1000;
@@ -141,6 +151,7 @@ function parseStoredState(raw: string | null): StoredReplyState {
         parsed.snoozedUntil && typeof parsed.snoozedUntil === "object"
           ? parsed.snoozedUntil
           : {},
+      preferences: mergeReplyPriorityPreferences(parsed.preferences),
     };
   } catch {
     return EMPTY_REPLY_STATE;
@@ -185,6 +196,13 @@ function formatRecipientList(values: string[]) {
 
 function buildPriorityReasonLine(item: ReplyQueueItem) {
   return item.priorityReasons.join(" · ");
+}
+
+function buildScoreBreakdownLine(item: ReplyQueueItem) {
+  return item.scoreBreakdown
+    .slice(0, 4)
+    .map((entry) => `${entry.label} +${entry.points}`)
+    .join(" · ");
 }
 
 function ScoreBadge({ score }: { score: number }) {
@@ -251,6 +269,51 @@ function buildPriorityPills(item: ReplyQueueItem) {
   return pills.slice(0, 4);
 }
 
+function WeightSlider({
+  id,
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="grid gap-2 rounded-2xl border border-[var(--bg-card-border)] bg-black/10 p-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-text-heading">
+            {label}
+          </div>
+          <div className="mt-1 text-[11px] leading-relaxed text-text-muted">
+            {description}
+          </div>
+        </div>
+        <div className="rounded-full border border-accent-amber/20 bg-accent-amber/10 px-2.5 py-1 text-[11px] font-medium text-accent-amber">
+          {formatPriorityWeight(value)}
+        </div>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={0}
+        max={2}
+        step={0.05}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-[var(--accent-amber)]"
+      />
+    </label>
+  );
+}
+
 export function ReplyCenter() {
   const { emails, loading: emailsLoading } = useEmails();
   const { chats, loading: chatsLoading } = useChats();
@@ -271,7 +334,11 @@ export function ReplyCenter() {
   const [activeFilter, setActiveFilter] = useState<FilterId>("all");
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [snoozedUntil, setSnoozedUntil] = useState<Record<string, number>>({});
+  const [preferences, setPreferences] = useState<ReplyPriorityPreferences>(
+    createDefaultReplyPriorityPreferences
+  );
   const [storageReady, setStorageReady] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [composerState, setComposerState] = useState<{
     itemId: string;
@@ -295,6 +362,7 @@ export function ReplyCenter() {
     if (!storageKey) {
       setDismissedIds(new Set());
       setSnoozedUntil({});
+      setPreferences(createDefaultReplyPriorityPreferences());
       setStorageReady(true);
       return;
     }
@@ -302,6 +370,7 @@ export function ReplyCenter() {
     const stored = parseStoredState(window.localStorage.getItem(storageKey));
     setDismissedIds(new Set(stored.dismissedIds));
     setSnoozedUntil(pruneSnoozes(stored.snoozedUntil));
+    setPreferences(stored.preferences);
     setStorageReady(true);
   }, [storageKey]);
 
@@ -311,10 +380,11 @@ export function ReplyCenter() {
     const payload: StoredReplyState = {
       dismissedIds: Array.from(dismissedIds),
       snoozedUntil: pruneSnoozes(snoozedUntil),
+      preferences,
     };
 
     window.localStorage.setItem(storageKey, JSON.stringify(payload));
-  }, [dismissedIds, snoozedUntil, storageKey, storageReady]);
+  }, [dismissedIds, preferences, snoozedUntil, storageKey, storageReady]);
 
   const queueItems = useMemo(
     () =>
@@ -324,9 +394,12 @@ export function ReplyCenter() {
         slackMessages,
         asanaComments,
         currentUserName,
+        preferences,
       }),
-    [asanaComments, chats, currentUserName, emails, slackMessages]
+    [asanaComments, chats, currentUserName, emails, preferences, slackMessages]
   );
+
+  const isCustomized = hasCustomizedReplyPriorityPreferences(preferences);
 
   const visibleItems = useMemo(() => {
     const now = Date.now();
@@ -451,6 +524,31 @@ export function ReplyCenter() {
     if (expandedId === itemId) setExpandedId(null);
     if (composerState?.itemId === itemId) setComposerState(null);
     addToast("Snoozed for 12 hours.", "default");
+  }
+
+  function resetPreferences() {
+    setPreferences(createDefaultReplyPriorityPreferences());
+    addToast("Priority settings reset to defaults.", "default");
+  }
+
+  function updateSourceWeight(source: ReplySource, next: number) {
+    setPreferences((current) => ({
+      ...current,
+      sourceWeights: {
+        ...current.sourceWeights,
+        [source]: next,
+      },
+    }));
+  }
+
+  function updateFactorWeight(factor: ReplyPriorityFactorKey, next: number) {
+    setPreferences((current) => ({
+      ...current,
+      factorWeights: {
+        ...current.factorWeights,
+        [factor]: next,
+      },
+    }));
   }
 
   async function copyText(text: string, message = "Copied to clipboard.") {
@@ -871,24 +969,121 @@ export function ReplyCenter() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {(Object.keys(FILTER_LABELS) as FilterId[]).map((filter) => (
+          <div className="flex flex-col gap-3 lg:items-end">
+            <div className="flex flex-wrap gap-2">
               <button
-                key={filter}
                 className={cn(
-                  "rounded-xl px-3 py-1.5 text-xs transition-colors",
-                  activeFilter === filter
-                    ? "bg-[var(--tab-active-bg)] text-accent-amber"
-                    : "bg-transparent text-text-muted hover:bg-[var(--tab-bg)] hover:text-text-body"
+                  "rounded-xl border px-3 py-1.5 text-xs transition-colors",
+                  showSettings
+                    ? "border-accent-amber/30 bg-accent-amber/12 text-accent-amber"
+                    : "border-[var(--bg-card-border)] text-text-muted hover:text-text-body"
                 )}
-                onClick={() => setActiveFilter(filter)}
+                onClick={() => setShowSettings((current) => !current)}
               >
-                {FILTER_LABELS[filter]}
-                <span className="ml-1 opacity-70">{counts[filter]}</span>
+                {showSettings ? "Hide tuning" : "Tune priorities"}
               </button>
-            ))}
+              {isCustomized && (
+                <>
+                  <span className="inline-flex items-center rounded-full border border-teal-400/20 bg-teal-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-teal-200">
+                    Custom
+                  </span>
+                  <button
+                    className="rounded-xl border border-[var(--bg-card-border)] px-3 py-1.5 text-xs text-text-muted transition-colors hover:text-text-body"
+                    onClick={resetPreferences}
+                  >
+                    Reset defaults
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(FILTER_LABELS) as FilterId[]).map((filter) => (
+                <button
+                  key={filter}
+                  className={cn(
+                    "rounded-xl px-3 py-1.5 text-xs transition-colors",
+                    activeFilter === filter
+                      ? "bg-[var(--tab-active-bg)] text-accent-amber"
+                      : "bg-transparent text-text-muted hover:bg-[var(--tab-bg)] hover:text-text-body"
+                  )}
+                  onClick={() => setActiveFilter(filter)}
+                >
+                  {FILTER_LABELS[filter]}
+                  <span className="ml-1 opacity-70">{counts[filter]}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        {showSettings && (
+          <div className="rounded-[28px] border border-[rgba(212,164,76,0.14)] bg-[var(--tab-bg)] p-4">
+            <div className="flex flex-col gap-3 border-b border-[var(--bg-card-border)] pb-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent-amber">
+                  Priority Tuning
+                </div>
+                <p className="mt-2 max-w-3xl text-sm leading-relaxed text-text-muted">
+                  Adjust how strongly each source and factor influences the queue. Changes apply instantly and stay in this browser for your account.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-text-muted">
+                  Live reordering
+                </div>
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-text-muted">
+                  Browser local
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_1.6fr]">
+              <div className="space-y-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-text-muted">
+                  Sources
+                </div>
+                <div className="grid gap-3">
+                  {REPLY_PRIORITY_SOURCE_CONTROLS.map((control) => (
+                    <WeightSlider
+                      key={control.key}
+                      id={`source-weight-${control.key}`}
+                      label={control.label}
+                      description={control.description}
+                      value={preferences.sourceWeights[control.key]}
+                      onChange={(next) => updateSourceWeight(control.key, next)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-text-muted">
+                    Scoring factors
+                  </div>
+                  {!isCustomized && (
+                    <div className="text-[11px] text-text-muted">
+                      Defaults loaded
+                    </div>
+                  )}
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {REPLY_PRIORITY_FACTOR_CONTROLS.map((control) => (
+                    <WeightSlider
+                      key={control.key}
+                      id={`factor-weight-${control.key}`}
+                      label={control.label}
+                      description={control.description}
+                      value={preferences.factorWeights[control.key]}
+                      onChange={(next) => updateFactorWeight(control.key, next)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading && visibleItems.length === 0 ? (
           <div className="py-8 text-center text-sm text-text-muted animate-pulse">
@@ -957,6 +1152,14 @@ export function ReplyCenter() {
                               Why
                             </span>
                             {buildPriorityReasonLine(item)}
+                          </p>
+                        )}
+                        {item.scoreBreakdown.length > 0 && (
+                          <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+                            <span className="mr-1 uppercase tracking-[0.18em] text-[10px] text-teal-200">
+                              Score
+                            </span>
+                            {buildScoreBreakdownLine(item)}
                           </p>
                         )}
 
@@ -1068,6 +1271,18 @@ export function ReplyCenter() {
                             Why this is high
                           </span>
                           {buildPriorityReasonLine(item)}
+                        </div>
+                      )}
+                      {item.scoreBreakdown.length > 0 && (
+                        <div className="mb-4 rounded-xl border border-[var(--bg-card-border)] bg-black/10 px-3 py-2 text-[11px] text-text-muted">
+                          <span className="mr-2 uppercase tracking-[0.18em] text-[10px] text-teal-200">
+                            Score recipe
+                          </span>
+                          {item.scoreBreakdown.map((entry) => (
+                            <span key={`${item.id}-${entry.key}`} className="mr-3 inline-flex">
+                              {entry.label} +{entry.points}
+                            </span>
+                          ))}
                         </div>
                       )}
 
