@@ -245,3 +245,21 @@ export interface TonePreset {
   generate: (context: string) => string;
   ariOnly?: boolean;
 }
+
+export interface BookingsTarget {
+  id: string;
+  user_id: string;
+  quarter: string;
+  segment: string;
+  target_amount: number;
+  color: string;
+  display_order: number;
+}
+
+export interface BookingsSegment {
+  name: string;
+  actual: number;
+  target: number;
+  pct: number;
+  color: string;
+}

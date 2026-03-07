@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PersonDetailPanel } from "./PersonDetailPanel";
 import type { Person } from "@/hooks/usePeople";
 
 const URGENCY_BORDERS: Record<string, string> = {
@@ -9,6 +10,20 @@ const URGENCY_BORDERS: Record<string, string> = {
   amber: "border-l-4 border-l-accent-amber",
   teal:  "border-l-4 border-l-accent-teal",
   gray:  "border-l-4 border-l-[#555]",
+};
+
+const URGENCY_AVATAR_BG: Record<string, string> = {
+  red:   "bg-accent-red/20 text-accent-red ring-accent-red/30",
+  amber: "bg-accent-amber/20 text-accent-amber ring-accent-amber/30",
+  teal:  "bg-accent-teal/20 text-accent-teal ring-accent-teal/30",
+  gray:  "bg-white/10 text-text-muted ring-white/10",
+};
+
+const URGENCY_BAR_COLOR: Record<string, string> = {
+  red:   "bg-accent-red",
+  amber: "bg-accent-amber",
+  teal:  "bg-accent-teal",
+  gray:  "bg-white/20",
 };
 
 const TIER_CONFIG = [
@@ -27,17 +42,22 @@ const CH_COLORS: Record<string, string> = {
 };
 
 const CH_ICONS: Record<string, string> = {
-  email:   "✉",
-  teams:   "💬",
-  asana:   "✓",
+  email:   "\u2709",
+  teams:   "\uD83D\uDCAC",
+  asana:   "\u2713",
   slack:   "#",
-  meeting: "📅",
+  meeting: "\uD83D\uDCC5",
 };
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return (parts[0]?.[0] ?? "?").toUpperCase();
+}
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 0) {
-    // Future event
     const mins = Math.floor(-diff / 60000);
     if (mins < 60) return `in ${mins}m`;
     const hrs = Math.floor(mins / 60);
@@ -62,6 +82,12 @@ interface PeopleViewProps {
 
 export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+
+  const maxTouchpoints = useMemo(
+    () => Math.max(1, ...people.map((p) => p.touchpoints)),
+    [people]
+  );
 
   function toggle(name: string) {
     setExpandedCards(prev => {
@@ -76,8 +102,13 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
       <div className="space-y-5">
         {[1,2,3].map(i => (
           <div key={i} className="glass-card anim-card p-5 animate-pulse">
-            <div className="h-4 bg-white/10 rounded w-1/3 mb-3" />
-            <div className="h-3 bg-white/5 rounded w-2/3" />
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-white/10" />
+              <div className="flex-1">
+                <div className="h-4 bg-white/10 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-white/5 rounded w-2/3" />
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -111,6 +142,7 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
                 const meetingItems = person.items.filter(i => i.ch === 'meeting');
                 const asanaItems = person.items.filter(i => i.ch === 'asana');
                 const slackItems = person.items.filter(i => i.ch === 'slack');
+                const densityPct = Math.round((person.touchpoints / maxTouchpoints) * 100);
 
                 return (
                   <div
@@ -125,37 +157,47 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
                       className="w-full text-left p-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
                       onClick={() => toggle(person.name)}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
+                      <div className="flex items-start gap-3">
+                        {/* Avatar */}
+                        <div
+                          className={cn(
+                            "w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ring-1",
+                            URGENCY_AVATAR_BG[person.urgency]
+                          )}
+                        >
+                          {getInitials(person.name)}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold text-text-heading">
+                            <span className="text-[13px] font-semibold text-text-heading">
                               {person.name}
                             </span>
                             {/* Channel badges */}
                             <div className="flex items-center gap-1">
                               {teamsItems.length > 0 && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded tag-teams">
-                                  💬 {teamsItems.length} DM{teamsItems.length > 1 ? 's' : ''}
+                                  {teamsItems.length}
                                 </span>
                               )}
                               {emailItems.length > 0 && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded tag-email">
-                                  ✉ {emailItems.length}
+                                  {emailItems.length}
                                 </span>
                               )}
                               {meetingItems.length > 0 && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">
-                                  📅 {meetingItems.length}
+                                  {meetingItems.length}
                                 </span>
                               )}
                               {asanaItems.length > 0 && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded tag-asana">
-                                  ✓ {asanaItems.length}
+                                  {asanaItems.length}
                                 </span>
                               )}
                               {slackItems.length > 0 && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded tag-slack">
-                                  # {slackItems.length}
+                                  {slackItems.length}
                                 </span>
                               )}
                             </div>
@@ -164,16 +206,25 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
                             <span className="text-xs text-text-muted">{person.action}</span>
                             {person.lastContact && (
                               <>
-                                <span className="text-text-muted opacity-30">·</span>
+                                <span className="text-text-muted opacity-30">\u00B7</span>
                                 <span className="text-[11px] text-text-muted">{person.lastContact}</span>
                               </>
                             )}
                           </div>
+
+                          {/* Interaction density bar */}
+                          <div className="mt-2 h-1 rounded-full bg-white/5 overflow-hidden">
+                            <div
+                              className={cn("h-full rounded-full transition-all", URGENCY_BAR_COLOR[person.urgency])}
+                              style={{ width: `${densityPct}%` }}
+                            />
+                          </div>
                         </div>
+
                         <svg
                           width="14" height="14"
                           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                          className={cn("shrink-0 text-text-muted mt-0.5 transition-transform", isExpanded && "rotate-180")}
+                          className={cn("shrink-0 text-text-muted mt-2 transition-transform", isExpanded && "rotate-180")}
                         >
                           <polyline points="6 9 12 15 18 9" />
                         </svg>
@@ -218,6 +269,15 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
 
                         {/* Quick actions */}
                         <div className="px-4 py-2.5 flex gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedPerson(person);
+                            }}
+                            className="text-[10px] px-2.5 py-1 rounded border border-accent-amber/30 text-accent-amber hover:bg-accent-amber/10 transition-colors font-medium"
+                          >
+                            Deep Dive
+                          </button>
                           {person.email && (
                             <a
                               href={`https://outlook.office.com/mail/new?to=${person.email}`}
@@ -225,12 +285,12 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
                               rel="noopener noreferrer"
                               className="text-[10px] px-2.5 py-1 rounded border border-[var(--bg-card-border)] text-text-muted hover:text-text-body hover:border-accent-amber/30 transition-colors"
                             >
-                              ✉ Email
+                              \u2709 Email
                             </a>
                           )}
                           {person.teamsChatId && (
                             <span className="text-[10px] px-2.5 py-1 rounded border border-[var(--bg-card-border)] text-text-muted">
-                              💬 Teams DM active
+                              \uD83D\uDCAC Teams DM
                             </span>
                           )}
                         </div>
@@ -243,6 +303,13 @@ export function PeopleView({ people = [], loading = false }: PeopleViewProps) {
           </div>
         );
       })}
+
+      {selectedPerson && (
+        <PersonDetailPanel
+          person={selectedPerson}
+          onClose={() => setSelectedPerson(null)}
+        />
+      )}
     </div>
   );
 }

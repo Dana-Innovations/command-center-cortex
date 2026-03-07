@@ -8,7 +8,7 @@ import { useChats } from './useChats';
 import { useAuth } from './useAuth';
 import { useLiveData } from '@/lib/live-data-context';
 
-interface TouchpointItem {
+export interface TouchpointItem {
   ch: 'email' | 'teams' | 'asana' | 'slack' | 'meeting';
   text: string;
   url: string;
@@ -79,7 +79,7 @@ function isOwnName(name: string, fullName: string): boolean {
 export function usePeople() {
   const { emails, sentEmails, loading: emailsLoading } = useEmails();
   const { events, loading: calLoading } = useCalendar();
-  const { loading: tasksLoading } = useTasks();
+  const { tasks, loading: tasksLoading } = useTasks();
   const { chats, loading: chatsLoading } = useChats();
   const { slack } = useLiveData();
   const { user } = useAuth();
@@ -271,7 +271,42 @@ export function usePeople() {
       }, urgencyLevel, msgMs);
     }
 
-    // ── Asana tasks — skipped (assignee field is GID, not name) ─────
+    // ── Asana tasks ────────────────────────────────────────────────
+    for (const task of tasks) {
+      const people: { name: string; email: string }[] = [];
+
+      if (task.assignee_name) {
+        people.push({ name: normalizeName(task.assignee_name), email: task.assignee_email || '' });
+      }
+      if (task.created_by_name) {
+        people.push({ name: normalizeName(task.created_by_name), email: task.created_by_email || '' });
+      }
+      for (let ci = 0; ci < (task.collaborator_names?.length || 0); ci++) {
+        const cn = task.collaborator_names![ci];
+        people.push({ name: normalizeName(cn), email: task.collaborator_emails?.[ci] || '' });
+      }
+
+      const taskMs = task.modified_at ? new Date(task.modified_at).getTime()
+        : task.due_on ? new Date(task.due_on).getTime() : 0;
+      if (taskMs > 0 && taskMs < sevenDaysAgo) continue;
+
+      for (const person of people) {
+        if (!person.name || shouldExclude(person.name, person.email)) continue;
+        if (isOwnName(person.name, fullName)) continue;
+
+        const daysAgo = taskMs > 0 ? Math.floor((now - taskMs) / 86400000) : 7;
+        const urgencyLevel = task.days_overdue > 0 ? 2 : daysAgo < 1 ? 1 : 0;
+
+        upsert(person.name, person.email, {
+          ch: 'asana',
+          text: task.name,
+          url: task.permalink_url || '#',
+          draft: '',
+          timestamp: task.modified_at || task.due_on || undefined,
+          preview: task.project_name ? `${task.project_name}${task.due_on ? ` · due ${task.due_on}` : ''}` : undefined,
+        }, urgencyLevel, taskMs, undefined);
+      }
+    }
 
     // ── Build result ────────────────────────────────────────────────
     const urgencyMap: Record<number, 'red' | 'amber' | 'teal' | 'gray'> = {
@@ -332,7 +367,7 @@ export function usePeople() {
     });
 
     return result;
-  }, [emails, sentEmails, events, chats, slack, fullName, now]);
+  }, [emails, sentEmails, events, chats, slack, tasks, fullName, now]);
 
   return { people, loading };
 }

@@ -8,6 +8,7 @@ import { JeanaSection } from "@/components/command-center/JeanaSection";
 import { SalesforcePipeline } from "@/components/command-center/SalesforcePipeline";
 import { PowerBIKPIs } from "@/components/command-center/PowerBIKPIs";
 import { PowerBIReports } from "@/components/command-center/PowerBIReports";
+import { BookingsDashboard } from "@/components/command-center/BookingsDashboard";
 import { MeetingPrep } from "@/components/command-center/MeetingPrep";
 import { OverdueTasks } from "@/components/command-center/OverdueTasks";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,7 +60,8 @@ export function CommandCenterView() {
         <OverdueTasks items={overdue} staleItems={stale} />
       )}
 
-      {/* ── Row 6: Power BI ─────────────────────────────────────────── */}
+      {/* ── Row 6: Bookings + Power BI ────────────────────────────── */}
+      <BookingsDashboard />
       <PowerBIKPIs />
       <PowerBIReports />
 
