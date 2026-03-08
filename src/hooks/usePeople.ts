@@ -164,7 +164,7 @@ export function usePeople() {
       }, urgencyLevel, sentMs);
     }
 
-    // ── Teams DMs — individual messages per chat ─────────────────────
+    // ── Teams DMs — one touchpoint per conversation thread ──────────
     for (const chat of chats) {
       const topic = chat.topic || '';
 
@@ -175,27 +175,41 @@ export function usePeople() {
       const webUrl = chat.web_url || '';
 
       if (chatMessages.length > 0) {
-        for (const msg of chatMessages) {
-          if (isOwnName(msg.from, fullName)) continue;
-
+        // Filter to relevant messages (not from self, within 7 days)
+        const relevant = chatMessages.filter(msg => {
+          if (isOwnName(msg.from, fullName)) return false;
           const msgMs = new Date(msg.timestamp).getTime();
-          if (msgMs < sevenDaysAgo) continue;
-
+          if (msgMs < sevenDaysAgo) return false;
           const personName = msg.from || topic;
-          if (!personName || personName === 'Teams Chat') continue;
+          if (!personName || personName === 'Teams Chat') return false;
+          return true;
+        });
 
-          const daysAgo = Math.floor((now - msgMs) / 86400000);
-          const urgencyLevel = daysAgo < 1 ? 2 : 1;
+        if (relevant.length === 0) continue;
 
-          upsert(personName, '', {
-            ch: 'teams',
-            text: msg.text ? `Teams: ${msg.text.slice(0, 60)}` : `Teams DM: ${personName}`,
-            url: webUrl,
-            draft: '',
-            timestamp: msg.timestamp,
-            preview: msg.text,
-          }, urgencyLevel, msgMs, chat.id);
-        }
+        // Use the latest message as the representative for this thread
+        const sorted = [...relevant].sort((a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        const latest = sorted[0];
+        const personName = latest.from || topic;
+        const latestMs = new Date(latest.timestamp).getTime();
+        const msgCount = sorted.length;
+
+        const daysAgo = Math.floor((now - latestMs) / 86400000);
+        const urgencyLevel = daysAgo < 1 ? 2 : 1;
+
+        const prefix = msgCount > 1 ? `Teams (${msgCount}): ` : 'Teams: ';
+        const previewText = latest.text ? latest.text.slice(0, 60) : `DM with ${personName}`;
+
+        upsert(personName, '', {
+          ch: 'teams',
+          text: `${prefix}${previewText}`,
+          url: webUrl,
+          draft: '',
+          timestamp: latest.timestamp,
+          preview: latest.text,
+        }, urgencyLevel, latestMs, chat.id);
       } else {
         // Fallback: use last_message_preview if no individual messages
         const preview = stripHtml(chat.last_message_preview || '');
