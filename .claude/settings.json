@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx eslint src/hooks/useAuth.ts)",
       "Bash(vercel --prod --yes)",
-      "Bash(vercel env add NEXT_PUBLIC_SITE_URL production --force)"
+      "Bash(vercel env add NEXT_PUBLIC_SITE_URL production --force)",
+      "Bash(vercel logs command-center-five-pi.vercel.app --limit 20)"
     ]
   },
   "mcpServers": {}
