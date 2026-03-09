@@ -55,6 +55,7 @@ export interface Task {
   project_name: string;
   permalink_url: string;
   priority: string;
+  num_subtasks?: number;
   days_overdue: number;
   synced_at: string;
 }

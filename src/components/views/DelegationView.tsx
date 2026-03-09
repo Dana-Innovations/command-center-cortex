@@ -66,6 +66,35 @@ function initials(name: string | null | undefined): string {
     .slice(0, 2);
 }
 
+const GORILLA_KEYWORDS = /\b(initiative|launch|program|rollout|strategy|overhaul|transformation|campaign|integration|migration|implementation|pilot)\b/i;
+
+function isAsanaGorilla(task: Task): boolean {
+  // Keyword match in task name or project name
+  if (GORILLA_KEYWORDS.test(task.name)) return true;
+  if (task.project_name && GORILLA_KEYWORDS.test(task.project_name)) return true;
+
+  // Structural: has subtasks
+  if (task.num_subtasks && task.num_subtasks > 0) return true;
+
+  // Structural: due date 30+ days from today
+  if (task.due_on) {
+    const daysUntilDue = Math.ceil(
+      (new Date(task.due_on).getTime() - TODAY.getTime()) / 86400000
+    );
+    if (daysUntilDue >= 30) return true;
+  }
+
+  // Structural: 3+ followers/members
+  const followerCount = (task.follower_names?.length ?? 0);
+  const collabCount = (task.collaborator_names?.length ?? 0);
+  if (followerCount + collabCount >= 3) return true;
+
+  // Structural: belongs to a named Asana project
+  if (task.project_name && task.project_name.trim().length > 0) return true;
+
+  return false;
+}
+
 function urgencyBorder(task: Task): string {
   if (task.days_overdue > 0) return "border-l-accent-red";
   const diff = task.due_on ? Math.ceil((new Date(task.due_on).getTime() - TODAY.getTime()) / 86400000) : 999;
@@ -176,7 +205,7 @@ function SectionHeader({
 interface GorillaItem {
   id: string;
   name: string;
-  source: "salesforce" | "monday";
+  source: "salesforce" | "monday" | "asana";
   owner: string;
   status: string;
   amount: number | null;
@@ -185,7 +214,14 @@ interface GorillaItem {
   url: string;
 }
 
-function gorillaStatusColor(status: string, source: "salesforce" | "monday"): string {
+function gorillaStatusColor(status: string, source: "salesforce" | "monday" | "asana"): string {
+  if (source === "asana") {
+    const s = status.toLowerCase();
+    if (s === "overdue") return "bg-accent-red/15 text-accent-red";
+    if (s === "stale") return "bg-accent-amber/15 text-accent-amber";
+    if (s === "on track") return "bg-accent-teal/15 text-accent-teal";
+    return "bg-white/10 text-text-muted";
+  }
   if (source === "monday") {
     const s = status.toUpperCase();
     if (s.includes("DWG NEEDED") || s.includes("PO NEEDED") || s.includes("SALES ORDER NEEDED"))
@@ -303,7 +339,7 @@ export function DelegationView() {
 
   const myMonkeys = useMemo(() => {
     let result = activeTasks.filter(
-      (t) => isUserMatch(t.assignee_email) || isUserMatch(t.assignee_name ?? t.assignee)
+      (t) => (isUserMatch(t.assignee_email) || isUserMatch(t.assignee_name ?? t.assignee)) && !isAsanaGorilla(t)
     );
     if (sourceFilter !== "all" && sourceFilter !== "asana") result = [];
     if (statusFilter === "overdue") result = result.filter((t) => t.days_overdue > 0);
@@ -323,7 +359,8 @@ export function DelegationView() {
         isUserMatch(t.created_by_email) &&
         !isUserMatch(t.assignee_email) &&
         !isUserMatch(t.assignee_name ?? t.assignee) &&
-        (t.assignee_name || t.assignee)
+        (t.assignee_name || t.assignee) &&
+        !isAsanaGorilla(t)
     );
     if (sourceFilter !== "all" && sourceFilter !== "asana") result = [];
     if (statusFilter === "overdue") result = result.filter((t) => t.days_overdue > 0);
@@ -394,8 +431,31 @@ export function DelegationView() {
       }
     }
 
+    if (sourceFilter === "all" || sourceFilter === "asana") {
+      for (const task of activeTasks) {
+        if (!isAsanaGorilla(task)) continue;
+        if (personFilter && task.assignee_name !== personFilter && task.created_by_name !== personFilter) continue;
+        if (statusFilter === "overdue" && task.days_overdue <= 0) continue;
+        if (statusFilter === "stale" && !isStale(task.modified_at)) continue;
+
+        const status = task.days_overdue > 0 ? "Overdue" : isStale(task.modified_at) ? "Stale" : "On Track";
+
+        items.push({
+          id: `asana-g-${task.id}`,
+          name: task.name,
+          source: "asana",
+          owner: task.assignee_name ?? task.assignee ?? task.created_by_name ?? "—",
+          status,
+          amount: null,
+          dueDate: task.due_on,
+          lastActivity: task.modified_at ?? null,
+          url: task.permalink_url,
+        });
+      }
+    }
+
     return items.sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
-  }, [opportunities, orders, sourceFilter, statusFilter, personFilter]);
+  }, [opportunities, orders, activeTasks, sourceFilter, statusFilter, personFilter]);
 
   // Needs my input
   const needsInput = useMemo(() => {
@@ -757,10 +817,10 @@ export function DelegationView() {
                   <span
                     className={cn(
                       "inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide shrink-0",
-                      g.source === "salesforce" ? "tag-salesforce" : "bg-[rgba(255,0,110,0.12)] text-[#ff006e]"
+                      g.source === "salesforce" ? "tag-salesforce" : g.source === "asana" ? "tag-asana" : "bg-[rgba(255,0,110,0.12)] text-[#ff006e]"
                     )}
                   >
-                    {g.source === "salesforce" ? "SF" : "MON"}
+                    {g.source === "salesforce" ? "SF" : g.source === "asana" ? "Asana" : "MON"}
                   </span>
                   <div className="flex-1 min-w-0">
                     <a
@@ -780,7 +840,7 @@ export function DelegationView() {
                     {g.status}
                   </span>
                   <span className="text-sm font-semibold text-text-heading tabular-nums shrink-0">
-                    {fmtAmount(g.amount)}
+                    {g.amount ? fmtAmount(g.amount) : g.dueDate ? fmtDue(g.dueDate, 0) : "—"}
                   </span>
                   <ActionChip label="Open" href={g.url} />
                 </div>
