@@ -11,6 +11,7 @@ import { CalendarView } from "@/components/views/CalendarView";
 import { SignalsView } from "@/components/views/SignalsView";
 import { MindensView } from "@/components/views/MindensView";
 import { DelegationView } from "@/components/views/DelegationView";
+import { MeetingPrepView } from "@/components/views/MeetingPrepView";
 import { usePeople } from "@/hooks/usePeople";
 import { EODSummary } from "@/components/modals/EODSummary";
 import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
@@ -52,6 +53,7 @@ function HomeContent() {
         {activeTab === "metrics"   && <MetricsView />}
         {activeTab === "people"    && <PeopleView people={people} loading={peopleLoading} />}
         {activeTab === "calendar"  && <CalendarView />}
+        {activeTab === "prep"      && <MeetingPrepView />}
         {activeTab === "signals"   && <SignalsView />}
         {activeTab === "minden"    && <MindensView />}
         {activeTab === "delegation" && <DelegationView />}
