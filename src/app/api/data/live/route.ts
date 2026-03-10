@@ -396,15 +396,17 @@ async function fetchCalendar(token: string, sessionId: string) {
   const now = new Date();
   const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const startDate = start.toISOString().slice(0, 10); // YYYY-MM-DD
+  const endDate = end.toISOString().slice(0, 10);
   const result = await cortexCall(
     token,
     sessionId,
     "cal",
     "m365__list_events",
     {
-      start_date: start.toISOString(),
-      end_date: end.toISOString(),
-      limit: 50,
+      start_date: startDate,
+      end_date: endDate,
+      count: 50,
     }
   );
   const events: Record<string, unknown>[] = result.events ?? result.value ?? [];

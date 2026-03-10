@@ -162,8 +162,18 @@ export async function cortexCall(
     }),
   });
   const data = (await res.json()) as {
-    result?: { content?: { text?: string }[] };
+    result?: { content?: { text?: string }[]; isError?: boolean };
+    error?: { code?: number; message?: string };
   };
+  if (data.error) {
+    console.error(`[cortexCall] ${tool} RPC error:`, data.error.message);
+    throw new Error(data.error.message || `RPC error calling ${tool}`);
+  }
+  if (data.result?.isError) {
+    const errText = data.result.content?.[0]?.text ?? "Unknown MCP error";
+    console.error(`[cortexCall] ${tool} MCP error:`, errText);
+    throw new Error(errText);
+  }
   const text = data?.result?.content?.[0]?.text ?? "{}";
   try {
     return JSON.parse(text);
