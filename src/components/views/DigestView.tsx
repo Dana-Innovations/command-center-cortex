@@ -15,8 +15,9 @@ import type { Task, CalendarEvent } from "@/lib/types";
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const STALE_DAYS = 5;
-const TODAY = new Date();
-const TODAY_STR = TODAY.toISOString().slice(0, 10);
+const MAX_ATTENTION_AGE_DAYS = 60; // Don't surface items older than this
+const MAX_ITEMS_PER_GROUP = 8; // Cap per source group in Needs Attention
+const MAX_GORILLAS_DISPLAY = 15;
 
 const GORILLA_KEYWORDS =
   /\b(initiative|launch|program|rollout|strategy|overhaul|transformation|campaign|integration|migration|implementation|pilot)\b/i;
@@ -25,7 +26,7 @@ const GORILLA_KEYWORDS =
 
 function daysSince(dateStr: string | null | undefined): number | null {
   if (!dateStr) return null;
-  return Math.floor((TODAY.getTime() - new Date(dateStr).getTime()) / 86400000);
+  return Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 86400000);
 }
 
 function isStale(modifiedAt: string | null | undefined): boolean {
@@ -34,20 +35,25 @@ function isStale(modifiedAt: string | null | undefined): boolean {
 }
 
 function isAsanaGorilla(task: Task): boolean {
+  // Strong signals — any one of these alone qualifies
   if (GORILLA_KEYWORDS.test(task.name)) return true;
   if (task.project_name && GORILLA_KEYWORDS.test(task.project_name)) return true;
-  if (task.num_subtasks && task.num_subtasks > 0) return true;
+
+  // Weak signals — need at least 2 to qualify
+  let signals = 0;
+  if (task.num_subtasks && task.num_subtasks > 0) signals++;
   if (task.due_on) {
     const daysUntilDue = Math.ceil(
-      (new Date(task.due_on).getTime() - TODAY.getTime()) / 86400000
+      (new Date(task.due_on).getTime() - new Date().getTime()) / 86400000
     );
-    if (daysUntilDue >= 30) return true;
+    if (daysUntilDue >= 30) signals++;
   }
   const followerCount = task.follower_names?.length ?? 0;
   const collabCount = task.collaborator_names?.length ?? 0;
-  if (followerCount + collabCount >= 3) return true;
-  if (task.project_name && task.project_name.trim().length > 0) return true;
-  return false;
+  if (followerCount + collabCount >= 5) return true; // Many people = gorilla
+  if (followerCount + collabCount >= 3) signals++;
+
+  return signals >= 2;
 }
 
 function relativeTime(dateStr: string | null | undefined): string {
@@ -100,6 +106,22 @@ function formatTimeShort(isoStr: string): string {
   });
 }
 
+function formatRelativeDay(dateStr: string): string {
+  const now = getPSTNow();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Handle both YYYY-MM-DD and ISO datetime strings
+  const parts = dateStr.slice(0, 10).split("-").map(Number);
+  const eventDay = new Date(parts[0], parts[1] - 1, parts[2]);
+  const diffDays = Math.round(
+    (eventDay.getTime() - todayStart.getTime()) / 86400000
+  );
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays < 7)
+    return eventDay.toLocaleDateString("en-US", { weekday: "long" });
+  return eventDay.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function fmtAmount(n: number | null | undefined) {
   if (!n) return "";
   return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -134,6 +156,12 @@ const NudgeIcon = (
 const ExternalIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+);
+
+const PrepIcon = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
   </svg>
 );
 
@@ -174,7 +202,7 @@ function SectionEmpty({ message }: { message: string }) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function DigestView() {
-  const { user, isAri } = useAuth();
+  const { user } = useAuth();
   const { events: calEvents, loading: calLoading } = useCalendar();
   const { tasks, loading: tasksLoading } = useTasks();
   const { emails, loading: emailsLoading } = useEmails();
@@ -192,6 +220,8 @@ export function DigestView() {
     const id = setInterval(() => setNow(getPSTNow()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  const todayStr = useMemo(() => now.toISOString().slice(0, 10), [now]);
 
   const greeting = getGreeting(now.getHours());
   const dateStr = now.toLocaleDateString("en-US", {
@@ -220,13 +250,56 @@ export function DigestView() {
         const pst = toPacificDate(e.start_time);
         if (!pst) return false;
         const eventDate = pst.toISOString().slice(0, 10);
-        return eventDate === TODAY_STR && !e.is_all_day;
+        return eventDate === todayStr && !e.is_all_day;
       })
       .sort(
         (a, b) =>
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
       );
-  }, [calEvents]);
+  }, [calEvents, todayStr]);
+
+  // Upcoming meetings (next 7 days, excluding today) — shown when no meetings today
+  const upcomingMeetings = useMemo(() => {
+    if (!calEvents || todayMeetings.length > 0) return [];
+    const pstNow = getPSTNow();
+    const weekOutStr = new Date(
+      pstNow.getFullYear(),
+      pstNow.getMonth(),
+      pstNow.getDate() + 7
+    )
+      .toISOString()
+      .slice(0, 10);
+    return calEvents
+      .filter((e) => {
+        const pst = toPacificDate(e.start_time);
+        if (!pst || e.is_all_day) return false;
+        const eventDate = pst.toISOString().slice(0, 10);
+        return eventDate > todayStr && eventDate <= weekOutStr;
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+  }, [calEvents, todayStr, todayMeetings.length]);
+
+  const showUpcoming = todayMeetings.length === 0 && upcomingMeetings.length > 0;
+
+  // Group upcoming meetings by day label
+  const upcomingByDay = useMemo(() => {
+    if (!showUpcoming) return [];
+    const groups: { label: string; events: CalendarEvent[] }[] = [];
+    let currentLabel = "";
+    for (const ev of upcomingMeetings) {
+      const pst = toPacificDate(ev.start_time);
+      const label = pst ? formatRelativeDay(pst.toISOString()) : "Upcoming";
+      if (label !== currentLabel) {
+        groups.push({ label, events: [] });
+        currentLabel = label;
+      }
+      groups[groups.length - 1].events.push(ev);
+    }
+    return groups;
+  }, [showUpcoming, upcomingMeetings]);
 
   const isCurrentMeeting = useCallback(
     (event: CalendarEvent): boolean => {
@@ -238,6 +311,20 @@ export function DigestView() {
     []
   );
 
+  // ─── Meeting progress ──────────────────────────────────────────────────────
+
+  const completedMeetingCount = useMemo(
+    () => todayMeetings.filter((e) => new Date(e.end_time).getTime() < new Date().getTime()).length,
+    [todayMeetings, now]
+  );
+
+  const nextMeetingId = useMemo(() => {
+    const upcoming = todayMeetings.find(
+      (e) => new Date(e.start_time).getTime() > new Date().getTime() && !isCurrentMeeting(e)
+    );
+    return upcoming?.id ?? null;
+  }, [todayMeetings, now, isCurrentMeeting]);
+
   // ─── Active tasks (not completed) ──────────────────────────────────────────
 
   const activeTasks = useMemo(
@@ -245,9 +332,20 @@ export function DigestView() {
     [tasks]
   );
 
-  // ─── My monkeys due today / overdue ────────────────────────────────────────
+  // ─── My monkeys (overdue + due within 7 days) ─────────────────────────────
 
-  const myMonkeysDueOrOverdue = useMemo(() => {
+  const weekOutStr = useMemo(() => {
+    const pstNow = getPSTNow();
+    return new Date(
+      pstNow.getFullYear(),
+      pstNow.getMonth(),
+      pstNow.getDate() + 7
+    )
+      .toISOString()
+      .slice(0, 10);
+  }, [todayStr]);
+
+  const myMonkeys = useMemo(() => {
     return activeTasks
       .filter((t) => {
         const isMine =
@@ -255,8 +353,11 @@ export function DigestView() {
           isUserMatch(t.assignee_name ?? t.assignee);
         if (!isMine) return false;
         if (isAsanaGorilla(t)) return false;
-        // Due today or overdue
-        return t.days_overdue > 0 || t.due_on === TODAY_STR;
+        // Overdue
+        if (t.days_overdue > 0) return true;
+        // Due within next 7 days
+        if (!t.due_on) return false;
+        return t.due_on >= todayStr && t.due_on <= weekOutStr;
       })
       .sort((a, b) => {
         // Overdue first (more overdue = higher)
@@ -266,7 +367,7 @@ export function DigestView() {
           return b.days_overdue - a.days_overdue;
         return (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999");
       });
-  }, [activeTasks, isUserMatch]);
+  }, [activeTasks, isUserMatch, todayStr, weekOutStr]);
 
   // ─── Needs Attention (combined feed) ───────────────────────────────────────
 
@@ -284,31 +385,33 @@ export function DigestView() {
   const needsAttention = useMemo(() => {
     const items: AttentionItem[] = [];
 
-    // Emails needing reply (oldest first)
+    // Emails needing reply
     for (const e of emails) {
-      if (e.needs_reply) {
-        items.push({
-          id: `em-${e.id}`,
-          title: e.subject,
-          source: "email",
-          preview: `From ${e.from_name}`,
-          timeAgo: relativeTime(e.received_at),
-          daysWaiting: e.days_overdue,
-          urgency: e.days_overdue > 2 ? "red" : e.days_overdue > 0 ? "amber" : "teal",
-          url: e.outlook_url,
-        });
-      }
+      if (!e.needs_reply) continue;
+      const age = daysSince(e.received_at) ?? 0;
+      if (age > MAX_ATTENTION_AGE_DAYS) continue;
+      items.push({
+        id: `em-${e.id}`,
+        title: e.subject,
+        source: "email",
+        preview: `From ${e.from_name}`,
+        timeAgo: relativeTime(e.received_at),
+        daysWaiting: e.days_overdue,
+        urgency: e.days_overdue > 2 ? "red" : e.days_overdue > 0 ? "amber" : "teal",
+        url: e.outlook_url,
+      });
     }
 
-    // Asana comments awaiting response
+    // Asana comments awaiting response (recent only)
     for (const c of asanaComments) {
+      const d = daysSince(c.latest_comment_at) ?? 0;
+      if (d > MAX_ATTENTION_AGE_DAYS) continue;
       if (
         (c.relevance_reason === "assignee" ||
           c.relevance_reason === "collaborator") &&
         !isUserMatch(c.latest_commenter_name) &&
         !isUserMatch(c.latest_commenter_email)
       ) {
-        const d = daysSince(c.latest_comment_at) ?? 0;
         items.push({
           id: `ac-${c.id}`,
           title: c.task_name,
@@ -322,35 +425,37 @@ export function DigestView() {
       }
     }
 
-    // Gorillas at risk (stale Salesforce opps)
+    // Stale Salesforce opps (recent only)
     for (const opp of opportunities) {
       if (opp.is_closed) continue;
-      if (isStale(opp.last_activity_date)) {
-        const d = daysSince(opp.last_activity_date) ?? 0;
-        items.push({
-          id: `sf-${opp.id}`,
-          title: opp.name,
-          source: "salesforce",
-          preview: `${opp.stage} · ${fmtAmount(opp.amount)}`,
-          timeAgo: relativeTime(opp.last_activity_date),
-          daysWaiting: d,
-          urgency: d > 14 ? "red" : "amber",
-          url: opp.sf_url,
-        });
-      }
+      if (!isStale(opp.last_activity_date)) continue;
+      const d = daysSince(opp.last_activity_date) ?? 0;
+      if (d > MAX_ATTENTION_AGE_DAYS) continue;
+      items.push({
+        id: `sf-${opp.id}`,
+        title: opp.name,
+        source: "salesforce",
+        preview: `${opp.stage} · ${fmtAmount(opp.amount)}`,
+        timeAgo: relativeTime(opp.last_activity_date),
+        daysWaiting: d,
+        urgency: d > 14 ? "red" : "amber",
+        url: opp.sf_url,
+      });
     }
 
-    // Stale gorilla tasks
+    // Stale gorilla tasks (recent only)
     for (const t of activeTasks) {
       if (!isAsanaGorilla(t)) continue;
+      const staleDays = daysSince(t.modified_at) ?? 0;
+      if (staleDays > MAX_ATTENTION_AGE_DAYS) continue;
       if (t.days_overdue > 0 || isStale(t.modified_at)) {
         items.push({
           id: `ag-${t.id}`,
           title: t.name,
           source: "asana",
-          preview: t.days_overdue > 0 ? `${t.days_overdue}d overdue` : `${daysSince(t.modified_at)}d stale`,
+          preview: t.days_overdue > 0 ? `${t.days_overdue}d overdue` : `${staleDays}d stale`,
           timeAgo: relativeTime(t.modified_at),
-          daysWaiting: t.days_overdue || (daysSince(t.modified_at) ?? 0),
+          daysWaiting: t.days_overdue || staleDays,
           urgency: t.days_overdue > 0 ? "red" : "amber",
           url: t.permalink_url,
         });
@@ -359,6 +464,34 @@ export function DigestView() {
 
     return items.sort((a, b) => b.daysWaiting - a.daysWaiting);
   }, [emails, asanaComments, opportunities, activeTasks, isUserMatch]);
+
+  // ─── Needs Attention grouped by source ────────────────────────────────────
+
+  const SOURCE_LABELS: Record<string, string> = {
+    email: "Email",
+    asana: "Asana",
+    salesforce: "Salesforce",
+  };
+
+  const attentionGroups = useMemo(() => {
+    const groups: Record<string, typeof needsAttention> = {};
+    for (const item of needsAttention) {
+      (groups[item.source] ??= []).push(item);
+    }
+    // Sort groups: most red items first, then cap each group
+    return Object.entries(groups)
+      .sort(([, a], [, b]) => {
+        const redA = a.filter((i) => i.urgency === "red").length;
+        const redB = b.filter((i) => i.urgency === "red").length;
+        return redB - redA;
+      })
+      .map(([source, items]) => ({
+        source,
+        items: items.slice(0, MAX_ITEMS_PER_GROUP),
+        total: items.length,
+        hasMore: items.length > MAX_ITEMS_PER_GROUP,
+      }));
+  }, [needsAttention]);
 
   // ─── Delegated going cold ──────────────────────────────────────────────────
 
@@ -372,15 +505,16 @@ export function DigestView() {
         const hasAssignee = !!(t.assignee_name || t.assignee);
         if (!createdByUser || !notAssignedToUser || !hasAssignee) return false;
         if (isAsanaGorilla(t)) return false;
-        // No update in 5+ days
+        // No update in 5+ days, but not ancient (>60d)
         const d = daysSince(t.modified_at);
-        return d !== null && d >= STALE_DAYS;
+        return d !== null && d >= STALE_DAYS && d <= MAX_ATTENTION_AGE_DAYS;
       })
       .sort((a, b) => {
         const aStale = daysSince(a.modified_at) ?? 0;
         const bStale = daysSince(b.modified_at) ?? 0;
         return bStale - aStale;
-      });
+      })
+      .slice(0, 10);
   }, [activeTasks, isUserMatch]);
 
   // ─── Gorillas in Flight ────────────────────────────────────────────────────
@@ -430,6 +564,9 @@ export function DigestView() {
 
     for (const t of activeTasks) {
       if (!isAsanaGorilla(t)) continue;
+      // Skip ancient gorillas — only show tasks with recent activity
+      const age = daysSince(t.modified_at) ?? 0;
+      if (age > 90) continue;
       const stale = isStale(t.modified_at);
       items.push({
         id: `ag-${t.id}`,
@@ -443,7 +580,12 @@ export function DigestView() {
       });
     }
 
-    return items;
+    // Sort: at-risk first, then cap display
+    items.sort((a, b) => {
+      const rank = { red: 0, amber: 1, teal: 2 };
+      return rank[a.urgency] - rank[b.urgency];
+    });
+    return items.slice(0, MAX_GORILLAS_DISPLAY);
   }, [opportunities, orders, activeTasks]);
 
   // ─── Quick stats ───────────────────────────────────────────────────────────
@@ -463,24 +605,40 @@ export function DigestView() {
     return { meetingsToday, openMonkeys, gorillasAtRisk, emailsNeedReply };
   }, [todayMeetings, activeTasks, gorillasInFlight, emails, isUserMatch]);
 
+  // ─── Email inbox summary ──────────────────────────────────────────────────
+
+  const emailStats = useMemo(() => {
+    const unread = emails.filter((e) => !e.is_read).length;
+    const needReply = emails.filter((e) => e.needs_reply).length;
+    const todayEmails = emails.filter((e) => {
+      const d = daysSince(e.received_at);
+      return d !== null && d === 0;
+    }).length;
+    return { unread, needReply, todayEmails };
+  }, [emails]);
+
+  // ─── Tomorrow's first meeting ──────────────────────────────────────────────
+
+  const tomorrowFirstMeeting = useMemo(() => {
+    if (!calEvents) return null;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    return calEvents
+      .filter((e) => {
+        const pst = toPacificDate(e.start_time);
+        if (!pst) return false;
+        return pst.toISOString().slice(0, 10) === tomorrowStr && !e.is_all_day;
+      })
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())[0] ?? null;
+  }, [calEvents, now]);
+
   const loading =
     calLoading || tasksLoading || emailsLoading || sfLoading || mondayLoading || commentsLoading;
 
   // Gorilla expand state
   const [expandedGorilla, setExpandedGorilla] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // ─── Gate behind isAri ───────────────────────────────────────────────────
-
-  if (!isAri) {
-    return (
-      <div className="glass-card p-10 text-center">
-        <p className="text-text-muted text-sm">
-          This view is not available for your account.
-        </p>
-      </div>
-    );
-  }
 
   // ─── Urgency helpers ─────────────────────────────────────────────────────
 
@@ -507,7 +665,7 @@ export function DigestView() {
     const map: Record<string, string> = {
       email: "tag-email",
       asana: "tag-asana",
-      salesforce: "tag-slack",
+      salesforce: "tag-salesforce",
       monday: "tag-teams",
     };
     return (
@@ -567,27 +725,33 @@ export function DigestView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* ── LEFT COLUMN ────────────────────────────────────────────────────── */}
         <div className="space-y-5">
-          {/* Today's Schedule */}
+          {/* Today's Schedule / Upcoming Schedule */}
           <div
             className="glass-card anim-card p-5"
             style={{ animationDelay: "80ms" }}
           >
             <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
               {SunriseIcon}
-              Today&apos;s Schedule
+              {showUpcoming ? "Upcoming Schedule" : "Today\u2019s Schedule"}
               <span className="text-xs text-text-muted font-normal">
-                ({todayMeetings.length})
+                ({showUpcoming ? upcomingMeetings.length : todayMeetings.length})
               </span>
+              {!loading && todayMeetings.length > 0 && (
+                <span className="text-xs text-accent-teal font-normal ml-auto">
+                  {completedMeetingCount}/{todayMeetings.length} done
+                </span>
+              )}
             </h2>
 
             {loading ? (
               <SectionSkeleton />
-            ) : todayMeetings.length === 0 ? (
-              <SectionEmpty message="No meetings today" />
-            ) : (
+            ) : todayMeetings.length > 0 ? (
+              /* ── Today's meetings (existing behavior) ── */
               <div className="space-y-2">
                 {todayMeetings.map((event) => {
                   const isCurrent = isCurrentMeeting(event);
+                  const isPast = new Date(event.end_time).getTime() < new Date().getTime();
+                  const isUpNext = event.id === nextMeetingId;
                   return (
                     <div
                       key={event.id}
@@ -595,15 +759,15 @@ export function DigestView() {
                         "flex items-start gap-3 p-3 rounded-lg transition-colors",
                         isCurrent
                           ? "bg-accent-teal/10 border border-accent-teal/30"
-                          : "bg-white/[0.03] hover:bg-white/[0.06]"
+                          : isUpNext
+                          ? "bg-accent-amber/5 border border-accent-amber/20"
+                          : "bg-white/[0.03] hover:bg-white/[0.06]",
+                        isPast && "opacity-50"
                       )}
                     >
-                      {/* Time column */}
                       <div className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-[70px] pt-0.5">
                         {formatTimeShort(event.start_time)}
                       </div>
-
-                      {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           {isCurrent && (
@@ -612,7 +776,12 @@ export function DigestView() {
                               NOW
                             </span>
                           )}
-                          <p className="text-sm font-medium text-text-heading truncate">
+                          {isUpNext && !isCurrent && (
+                            <span className="inline-flex items-center text-[10px] font-semibold text-accent-amber uppercase tracking-wider">
+                              UP NEXT
+                            </span>
+                          )}
+                          <p className={cn("text-sm font-medium text-text-heading truncate", isPast && "line-through")}>
                             {event.subject}
                           </p>
                         </div>
@@ -622,31 +791,98 @@ export function DigestView() {
                           {event.organizer && ` · ${event.organizer}`}
                         </p>
                       </div>
-
-                      {/* Join link */}
-                      {event.is_online && event.join_url && (
-                        <a
-                          href={event.join_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={cn(
-                            "shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors",
-                            isCurrent
-                              ? "bg-accent-teal/20 text-accent-teal hover:bg-accent-teal/30"
-                              : "bg-white/5 text-text-muted hover:text-text-body hover:bg-white/10"
-                          )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() =>
+                            window.dispatchEvent(
+                              new CustomEvent("navigate-prep", { detail: { eventId: event.id } })
+                            )
+                          }
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 text-text-muted text-[11px] font-medium hover:text-text-body hover:bg-white/10 transition-colors"
                         >
-                          {VideoIcon} Join
-                        </a>
-                      )}
+                          {PrepIcon} Prep
+                        </button>
+                        {event.is_online && event.join_url && (
+                          <a
+                            href={event.join_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors",
+                              isCurrent
+                                ? "bg-accent-teal/20 text-accent-teal hover:bg-accent-teal/30"
+                                : "bg-white/5 text-text-muted hover:text-text-body hover:bg-white/10"
+                            )}
+                          >
+                            {VideoIcon} Join
+                          </a>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
+            ) : showUpcoming ? (
+              /* ── Upcoming meetings grouped by day ── */
+              <div className="space-y-4">
+                {upcomingByDay.map((group) => (
+                  <div key={group.label}>
+                    <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">
+                      {group.label}
+                    </p>
+                    <div className="space-y-2">
+                      {group.events.map((event) => (
+                        <div
+                          key={event.id}
+                          className="flex items-start gap-3 p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]"
+                        >
+                          <div className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-[70px] pt-0.5">
+                            {formatTimeShort(event.start_time)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-text-heading truncate">
+                              {event.subject}
+                            </p>
+                            <p className="text-xs text-text-muted truncate mt-0.5">
+                              {formatTimeShort(event.start_time)} –{" "}
+                              {formatTimeShort(event.end_time)}
+                              {event.organizer && ` · ${event.organizer}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() =>
+                                window.dispatchEvent(
+                                  new CustomEvent("navigate-prep", { detail: { eventId: event.id } })
+                                )
+                              }
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 text-text-muted text-[11px] font-medium hover:text-text-body hover:bg-white/10 transition-colors"
+                            >
+                              {PrepIcon} Prep
+                            </button>
+                            {event.is_online && event.join_url && (
+                              <a
+                                href={event.join_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors bg-white/5 text-text-muted hover:text-text-body hover:bg-white/10"
+                              >
+                                {VideoIcon} Join
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <SectionEmpty message="No meetings this week" />
             )}
           </div>
 
-          {/* My Monkeys Due Today / Overdue */}
+          {/* My Monkeys */}
           <div
             className="glass-card anim-card p-5"
             style={{ animationDelay: "160ms" }}
@@ -655,20 +891,33 @@ export function DigestView() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
               </svg>
-              My Monkeys — Due Today &amp; Overdue
+              My Monkeys
               <span className="text-xs text-text-muted font-normal">
-                ({myMonkeysDueOrOverdue.length})
+                ({myMonkeys.length})
               </span>
             </h2>
 
             {loading ? (
               <SectionSkeleton />
-            ) : myMonkeysDueOrOverdue.length === 0 ? (
-              <SectionEmpty message="No monkeys due today or overdue" />
+            ) : myMonkeys.length === 0 ? (
+              <SectionEmpty message="No monkeys due this week" />
             ) : (
               <div className="space-y-2">
-                {myMonkeysDueOrOverdue.map((task) => {
+                {myMonkeys.map((task) => {
                   const isOverdue = task.days_overdue > 0;
+                  const isDueToday = !isOverdue && task.due_on === todayStr;
+                  const urgency: "red" | "amber" | "teal" = isOverdue
+                    ? "red"
+                    : isDueToday
+                    ? "amber"
+                    : "teal";
+                  const badgeLabel = isOverdue
+                    ? `${task.days_overdue}d overdue`
+                    : isDueToday
+                    ? "Due today"
+                    : task.due_on
+                    ? formatRelativeDay(task.due_on)
+                    : "Upcoming";
                   return (
                     <a
                       key={task.id}
@@ -677,7 +926,7 @@ export function DigestView() {
                       rel="noopener noreferrer"
                       className={cn(
                         "block p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]",
-                        urgencyBorder(isOverdue ? "red" : "amber")
+                        urgencyBorder(urgency)
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -689,10 +938,12 @@ export function DigestView() {
                             "shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full",
                             isOverdue
                               ? "bg-accent-red/15 text-accent-red"
-                              : "bg-accent-amber/15 text-accent-amber"
+                              : isDueToday
+                              ? "bg-accent-amber/15 text-accent-amber"
+                              : "bg-accent-teal/15 text-accent-teal"
                           )}
                         >
-                          {isOverdue ? `${task.days_overdue}d overdue` : "Due today"}
+                          {badgeLabel}
                         </span>
                       </div>
                       <p className="text-xs text-text-muted mt-1 truncate">
@@ -705,6 +956,75 @@ export function DigestView() {
               </div>
             )}
           </div>
+
+          {/* Email Inbox Snapshot */}
+          <div
+            className="glass-card anim-card p-5"
+            style={{ animationDelay: "240ms" }}
+          >
+            <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" />
+              </svg>
+              Email Inbox
+            </h2>
+
+            {loading ? (
+              <SectionSkeleton />
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-3 rounded-lg bg-white/[0.03]">
+                  <p className="text-lg font-bold tabular-nums text-text-heading">
+                    {emailStats.todayEmails}
+                  </p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wide">
+                    Today
+                  </p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-white/[0.03]">
+                  <p className={cn("text-lg font-bold tabular-nums", emailStats.unread > 0 ? "text-accent-amber" : "text-text-muted")}>
+                    {emailStats.unread}
+                  </p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wide">
+                    Unread
+                  </p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-white/[0.03]">
+                  <p className={cn("text-lg font-bold tabular-nums", emailStats.needReply > 0 ? "text-accent-red" : "text-text-muted")}>
+                    {emailStats.needReply}
+                  </p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wide">
+                    Need Reply
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tomorrow Preview — hidden when upcoming schedule already shows it */}
+          {!showUpcoming && tomorrowFirstMeeting && (
+            <div
+              className="glass-card anim-card p-5"
+              style={{ animationDelay: "320ms" }}
+            >
+              <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                </svg>
+                Tomorrow Starts With
+              </h2>
+              <div className="p-3 rounded-lg bg-white/[0.03]">
+                <p className="text-sm font-medium text-text-heading truncate">
+                  {tomorrowFirstMeeting.subject}
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  {formatTimeShort(tomorrowFirstMeeting.start_time)} –{" "}
+                  {formatTimeShort(tomorrowFirstMeeting.end_time)}
+                  {tomorrowFirstMeeting.organizer && ` · ${tomorrowFirstMeeting.organizer}`}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── RIGHT COLUMN ───────────────────────────────────────────────────── */}
@@ -729,36 +1049,50 @@ export function DigestView() {
             ) : needsAttention.length === 0 ? (
               <SectionEmpty message="Nothing needs attention right now" />
             ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-                {needsAttention.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={cn(
-                      "block p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]",
-                      urgencyBorder(item.urgency)
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        {urgencyDot(item.urgency)}
-                        <p className="text-sm font-medium text-text-heading truncate">
-                          {item.title}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {sourceBadge(item.source)}
-                        <span className="text-[10px] text-text-muted">
-                          {item.timeAgo}
-                        </span>
-                      </div>
+              <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
+                {attentionGroups.map((group) => (
+                  <div key={group.source}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {sourceBadge(group.source)}
+                      <span className="text-[10px] text-text-muted">
+                        {group.total} {group.total === 1 ? "item" : "items"}
+                      </span>
                     </div>
-                    <p className="text-xs text-text-muted mt-1 truncate pl-4">
-                      {item.preview}
-                    </p>
-                  </a>
+                    <div className="space-y-2">
+                      {group.items.map((item) => (
+                        <a
+                          key={item.id}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            "block p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]",
+                            urgencyBorder(item.urgency)
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              {urgencyDot(item.urgency)}
+                              <p className="text-sm font-medium text-text-heading truncate">
+                                {item.title}
+                              </p>
+                            </div>
+                            <span className="text-[10px] text-text-muted shrink-0">
+                              {item.timeAgo}
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-muted mt-1 truncate pl-4">
+                            {item.preview}
+                          </p>
+                        </a>
+                      ))}
+                      {group.hasMore && (
+                        <p className="text-[10px] text-text-muted text-center py-1 opacity-60">
+                          +{group.total - MAX_ITEMS_PER_GROUP} more
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -863,10 +1197,11 @@ export function DigestView() {
         ) : gorillasInFlight.length === 0 ? (
           <SectionEmpty message="No active gorillas" />
         ) : (
-          <div
-            ref={scrollRef}
-            className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin"
-          >
+          <div className="relative">
+            <div
+              ref={scrollRef}
+              className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin"
+            >
             {gorillasInFlight.map((g) => (
               <div
                 key={g.id}
@@ -926,6 +1261,10 @@ export function DigestView() {
                 )}
               </div>
             ))}
+            </div>
+            {gorillasInFlight.length > 2 && (
+              <div className="absolute right-0 top-0 bottom-2 w-12 bg-gradient-to-l from-[var(--bg-card,rgba(0,0,0,0.3))] to-transparent pointer-events-none md:hidden" />
+            )}
           </div>
         )}
       </div>

@@ -48,7 +48,14 @@ export function CommandCenterView() {
 
       {/* ── Row 3: Meeting Prep + Jeana ─────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <MeetingPrep meetings={meetingPrep} />
+        <MeetingPrep
+          meetings={meetingPrep}
+          onPrepMeeting={(eventId) => {
+            window.dispatchEvent(
+              new CustomEvent("navigate-prep", { detail: { eventId } })
+            );
+          }}
+        />
         {isAri && <JeanaSection items={jeanaItems} />}
       </div>
 

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/Header";
 import { TabBar, type TabId } from "@/components/layout/TabBar";
 import { Footer } from "@/components/layout/Footer";
@@ -31,8 +31,23 @@ function HomeContent() {
   const [activeTab, setActiveTab] = useState<TabId>("digest");
   const [eodOpen, setEodOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [prepEventId, setPrepEventId] = useState<string | undefined>();
   const { loading, fetchedAt, error, refetch } = useLiveData();
   const { people, loading: peopleLoading } = usePeople();
+
+  const handlePrepNavigate = useCallback((eventId: string) => {
+    setPrepEventId(eventId);
+    setActiveTab("prep");
+  }, []);
+
+  // Listen for navigate-prep custom events from child components
+  useEffect(() => {
+    const handler = ((e: CustomEvent<{ eventId: string }>) => {
+      handlePrepNavigate(e.detail.eventId);
+    }) as EventListener;
+    window.addEventListener("navigate-prep", handler);
+    return () => window.removeEventListener("navigate-prep", handler);
+  }, [handlePrepNavigate]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -60,7 +75,7 @@ function HomeContent() {
         {activeTab === "people"    && <PeopleView people={people} loading={peopleLoading} />}
         {activeTab === "relationships" && <RelationshipView />}
         {activeTab === "calendar"  && <CalendarView />}
-        {activeTab === "prep"      && <MeetingPrepView />}
+        {activeTab === "prep"      && <MeetingPrepView initialEventId={prepEventId} />}
         {activeTab === "signals"   && <SignalsView />}
         {activeTab === "minden"    && <MindensView />}
         {activeTab === "delegation" && <DelegationView />}

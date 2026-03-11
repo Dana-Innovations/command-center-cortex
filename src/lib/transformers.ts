@@ -192,12 +192,35 @@ export interface MeetingPrepItem {
   oneLiner: string;
   details: string[];
   url: string;
+  dayLabel: string;
+  eventId: string;
+}
+
+function formatRelativeDay(iso: string): string {
+  const now = new Date();
+  const d = toPST(iso);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const eventDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((eventDay.getTime() - todayStart.getTime()) / 86400000);
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'long' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 export function transformMeetingPrep(events: CalendarEvent[]): MeetingPrepItem[] {
   if (!events.length) return [];
 
+  const now = new Date();
+  const weekOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
   return [...events]
+    .filter((ev) => {
+      const end = new Date(ev.end_time);
+      const start = new Date(ev.start_time);
+      return end >= now && start <= weekOut;
+    })
     .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
     .map((ev) => ({
       time: formatTimeRange(ev.start_time, ev.end_time),
@@ -211,6 +234,8 @@ export function transformMeetingPrep(events: CalendarEvent[]): MeetingPrepItem[]
         : '',
       details: [],
       url: ev.outlook_url || '',
+      dayLabel: formatRelativeDay(ev.start_time),
+      eventId: ev.id,
     }));
 }
 

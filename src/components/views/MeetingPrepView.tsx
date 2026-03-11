@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useCalendar } from "@/hooks/useCalendar";
 import { useEmails } from "@/hooks/useEmails";
@@ -110,6 +110,22 @@ interface MeetingContext {
   relatedTasks: Task[];
   relatedOpps: SalesforceOpportunity[];
   prepBullets: PrepBullet[];
+}
+
+interface AIMeetingPrep {
+  summary: string;
+  attendeeInsights: Array<{
+    name: string;
+    role?: string;
+    company?: string;
+    insight: string;
+  }>;
+  companyInsights: Array<{
+    company: string;
+    insight: string;
+  }>;
+  talkingPoints: string[];
+  risks: string[];
 }
 
 // ─── Data Builder ────────────────────────────────────────────────────────────
@@ -496,12 +512,141 @@ function PrepEmptyState() {
 
 // ─── Right Panel ─────────────────────────────────────────────────────────────
 
+function AIResearchSection({ aiPrep }: { aiPrep: AIMeetingPrep }) {
+  return (
+    <div className="border-l-2 border-accent-amber/40 pl-4 space-y-4 my-4">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-amber bg-accent-amber/10 px-2 py-0.5 rounded">
+          AI Research
+        </span>
+      </div>
+
+      {/* Summary */}
+      {aiPrep.summary && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            Summary
+          </div>
+          <p className="text-xs text-text-body leading-relaxed">
+            {aiPrep.summary}
+          </p>
+        </div>
+      )}
+
+      {/* Attendee Insights */}
+      {aiPrep.attendeeInsights?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            Attendee Insights
+          </div>
+          <div className="space-y-2">
+            {aiPrep.attendeeInsights.map((a, i) => (
+              <div
+                key={i}
+                className="p-2.5 rounded-lg bg-[var(--bg-card-border)]/50"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium text-text-heading">
+                    {a.name}
+                  </span>
+                  {a.role && (
+                    <span className="text-[10px] text-text-muted">
+                      {a.role}
+                      {a.company ? ` at ${a.company}` : ""}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-text-body leading-relaxed">
+                  {a.insight}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Company Insights */}
+      {aiPrep.companyInsights?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            Company Intel
+          </div>
+          <div className="space-y-2">
+            {aiPrep.companyInsights.map((c, i) => (
+              <div
+                key={i}
+                className="p-2.5 rounded-lg bg-[var(--bg-card-border)]/50"
+              >
+                <div className="text-xs font-medium text-text-heading mb-1">
+                  {c.company}
+                </div>
+                <p className="text-[11px] text-text-body leading-relaxed">
+                  {c.insight}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Talking Points */}
+      {aiPrep.talkingPoints?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            Suggested Talking Points
+          </div>
+          <div className="space-y-1.5">
+            {aiPrep.talkingPoints.map((tp, i) => (
+              <div key={i} className="flex gap-2 items-start">
+                <span className="text-accent-amber mt-0.5 shrink-0 text-xs">
+                  {i + 1}.
+                </span>
+                <span className="text-xs text-text-body">{tp}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Risks */}
+      {aiPrep.risks?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            Watch Out For
+          </div>
+          <div className="space-y-1.5">
+            {aiPrep.risks.map((r, i) => (
+              <div
+                key={i}
+                className="flex gap-2 items-start p-2 rounded-md bg-accent-red/5 border border-accent-red/15"
+              >
+                <span className="text-accent-red mt-0.5 shrink-0 text-xs">
+                  ⚠
+                </span>
+                <span className="text-xs text-text-body">{r}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrepPanel({
   event,
   context,
+  aiPrep,
+  aiLoading,
+  aiError,
+  onResearch,
 }: {
   event: CalendarEvent;
   context: MeetingContext;
+  aiPrep?: AIMeetingPrep | null;
+  aiLoading: boolean;
+  aiError?: string | null;
+  onResearch: () => void;
 }) {
   const { attendees, emailThreads, relatedTasks, relatedOpps, prepBullets } =
     context;
@@ -550,6 +695,64 @@ function PrepPanel({
           )}
         </div>
       </div>
+
+      {/* Research This Meeting button */}
+      <div className="py-3 border-b border-[var(--bg-card-border)]">
+        <button
+          onClick={onResearch}
+          disabled={aiLoading}
+          className={cn(
+            "w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg",
+            "text-sm font-semibold transition-colors cursor-pointer",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            aiPrep
+              ? "bg-[var(--bg-card-border)] text-text-muted hover:text-text-body"
+              : "bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25"
+          )}
+        >
+          {aiLoading ? (
+            <>
+              <svg
+                className="w-4 h-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeDasharray="32"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Researching...
+            </>
+          ) : (
+            <>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              {aiPrep ? "Re-Research" : "Research This Meeting"}
+            </>
+          )}
+        </button>
+        {aiError && (
+          <p className="text-xs text-accent-red mt-2 text-center">{aiError}</p>
+        )}
+      </div>
+
+      {/* AI Research Results */}
+      {aiPrep && <AIResearchSection aiPrep={aiPrep} />}
 
       {/* Prep Bullets */}
       {contextBullets.length > 0 && (
@@ -819,7 +1022,7 @@ function PrepPanel({
 
 // ─── Main View ───────────────────────────────────────────────────────────────
 
-export function MeetingPrepView() {
+export function MeetingPrepView({ initialEventId }: { initialEventId?: string }) {
   const { events, loading: calLoading } = useCalendar();
   const { emails, sentEmails, loading: emailsLoading } = useEmails();
   const { tasks, loading: tasksLoading } = useTasks();
@@ -828,8 +1031,18 @@ export function MeetingPrepView() {
   const fullName = user?.user_metadata?.full_name ?? "";
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [aiPreps, setAiPreps] = useState<Record<string, AIMeetingPrep>>({});
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const loading = calLoading || emailsLoading || tasksLoading || sfLoading;
+
+  // Auto-select meeting from initialEventId prop
+  useEffect(() => {
+    if (initialEventId) {
+      setSelectedId(initialEventId);
+    }
+  }, [initialEventId]);
 
   // Get upcoming meetings (today + future), sorted by start time
   const upcomingMeetings = useMemo(() => {
@@ -865,7 +1078,54 @@ export function MeetingPrepView() {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setAiError(null);
   }, []);
+
+  const handleResearch = useCallback(async () => {
+    if (!selectedEvent || !context) return;
+    setAiLoading(true);
+    setAiError(null);
+
+    try {
+      const res = await fetch("/api/ai/meeting-prep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: selectedEvent.subject,
+          organizer: selectedEvent.organizer,
+          location: selectedEvent.location,
+          startTime: selectedEvent.start_time,
+          endTime: selectedEvent.end_time,
+          existingContext: {
+            attendeeNames: context.attendees.map((a) => a.name),
+            emailSubjects: context.emailThreads.map((t) => t.subject),
+            relatedOpps: context.relatedOpps.map((o) => ({
+              name: o.name,
+              account: o.account_name,
+              amount: o.amount,
+              stage: o.stage,
+            })),
+            relatedTaskNames: context.relatedTasks.map((t) => t.name),
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data: AIMeetingPrep = await res.json();
+      setAiPreps((prev) => ({ ...prev, [selectedEvent.id]: data }));
+    } catch (err) {
+      console.error("AI prep failed:", err);
+      setAiError(err instanceof Error ? err.message : "Research failed. Try again.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [selectedEvent, context]);
+
+  const currentAiPrep = selectedEvent ? aiPreps[selectedEvent.id] ?? null : null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 min-h-[600px]">
@@ -929,7 +1189,14 @@ export function MeetingPrepView() {
         ) : !context ? (
           <PrepSkeleton />
         ) : (
-          <PrepPanel event={selectedEvent} context={context} />
+          <PrepPanel
+            event={selectedEvent}
+            context={context}
+            aiPrep={currentAiPrep}
+            aiLoading={aiLoading}
+            aiError={aiError}
+            onResearch={handleResearch}
+          />
         )}
       </div>
     </div>
