@@ -234,9 +234,11 @@ export function DigestView() {
   // User match helper
   const isUserMatch = useCallback(
     (nameOrEmail: string | null | undefined): boolean => {
-      if (!nameOrEmail || !userEmail) return false;
+      if (!nameOrEmail) return false;
       const n = nameOrEmail.toLowerCase().trim();
-      return n === userEmail || n === userName.toLowerCase();
+      if (userEmail && n === userEmail) return true;
+      if (userName && n === userName.toLowerCase()) return true;
+      return false;
     },
     [userEmail, userName]
   );
@@ -332,7 +334,7 @@ export function DigestView() {
     [tasks]
   );
 
-  // ─── My monkeys (overdue + due within 7 days) ─────────────────────────────
+  // ─── My monkeys (progressive fallback) ─────────────────────────────────────
 
   const weekOutStr = useMemo(() => {
     const pstNow = getPSTNow();
@@ -345,28 +347,51 @@ export function DigestView() {
       .slice(0, 10);
   }, [todayStr]);
 
-  const myMonkeys = useMemo(() => {
-    return activeTasks
-      .filter((t) => {
-        const isMine =
-          isUserMatch(t.assignee_email) ||
-          isUserMatch(t.assignee_name ?? t.assignee);
-        if (!isMine) return false;
-        if (isAsanaGorilla(t)) return false;
-        // Overdue
-        if (t.days_overdue > 0) return true;
-        // Due within next 7 days
-        if (!t.due_on) return false;
-        return t.due_on >= todayStr && t.due_on <= weekOutStr;
-      })
-      .sort((a, b) => {
-        // Overdue first (more overdue = higher)
+  const { myMonkeys, monkeyFallbackTier } = useMemo(() => {
+    const nonGorillaActive = activeTasks.filter((t) => !isAsanaGorilla(t));
+
+    const sortMonkeys = (list: typeof activeTasks) =>
+      [...list].sort((a, b) => {
         if (a.days_overdue > 0 && b.days_overdue <= 0) return -1;
         if (b.days_overdue > 0 && a.days_overdue <= 0) return 1;
         if (a.days_overdue > 0 && b.days_overdue > 0)
           return b.days_overdue - a.days_overdue;
-        return (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999");
+        // Tasks with dates before tasks without
+        const aDue = a.due_on || "";
+        const bDue = b.due_on || "";
+        if (aDue && !bDue) return -1;
+        if (!aDue && bDue) return 1;
+        return aDue.localeCompare(bDue);
       });
+
+    // Tier 1: User-matched + date-restricted (overdue + due within 7 days)
+    const tier1 = nonGorillaActive.filter((t) => {
+      const isMine =
+        isUserMatch(t.assignee_email) ||
+        isUserMatch(t.assignee_name ?? t.assignee);
+      if (!isMine) return false;
+      if (t.days_overdue > 0) return true;
+      if (!t.due_on) return false;
+      return t.due_on >= todayStr && t.due_on <= weekOutStr;
+    });
+    if (tier1.length > 0) {
+      return { myMonkeys: sortMonkeys(tier1), monkeyFallbackTier: 1 as const };
+    }
+
+    // Tier 2: User-matched, no date restriction (includes undated tasks)
+    const tier2 = nonGorillaActive.filter((t) =>
+      isUserMatch(t.assignee_email) ||
+      isUserMatch(t.assignee_name ?? t.assignee)
+    );
+    if (tier2.length > 0) {
+      return { myMonkeys: sortMonkeys(tier2), monkeyFallbackTier: 2 as const };
+    }
+
+    // Tier 3: All active non-gorilla tasks (API scopes to user's projects)
+    return {
+      myMonkeys: sortMonkeys(nonGorillaActive).slice(0, 15),
+      monkeyFallbackTier: 3 as const,
+    };
   }, [activeTasks, isUserMatch, todayStr, weekOutStr]);
 
   // ─── Needs Attention (combined feed) ───────────────────────────────────────
@@ -592,18 +617,13 @@ export function DigestView() {
 
   const stats = useMemo(() => {
     const meetingsToday = todayMeetings.length;
-    const openMonkeys = activeTasks.filter(
-      (t) =>
-        (isUserMatch(t.assignee_email) ||
-          isUserMatch(t.assignee_name ?? t.assignee)) &&
-        !isAsanaGorilla(t)
-    ).length;
+    const openMonkeys = myMonkeys.length;
     const gorillasAtRisk = gorillasInFlight.filter(
       (g) => g.urgency === "red" || g.urgency === "amber"
     ).length;
     const emailsNeedReply = emails.filter((e) => e.needs_reply).length;
     return { meetingsToday, openMonkeys, gorillasAtRisk, emailsNeedReply };
-  }, [todayMeetings, activeTasks, gorillasInFlight, emails, isUserMatch]);
+  }, [todayMeetings, myMonkeys, gorillasInFlight, emails]);
 
   // ─── Email inbox summary ──────────────────────────────────────────────────
 
@@ -895,17 +915,24 @@ export function DigestView() {
               <span className="text-xs text-text-muted font-normal">
                 ({myMonkeys.length})
               </span>
+              {monkeyFallbackTier === 2 && (
+                <span className="text-xs text-text-muted font-normal ml-auto">All tasks</span>
+              )}
+              {monkeyFallbackTier === 3 && (
+                <span className="text-xs text-text-muted font-normal ml-auto">From my projects</span>
+              )}
             </h2>
 
             {loading ? (
               <SectionSkeleton />
             ) : myMonkeys.length === 0 ? (
-              <SectionEmpty message="No monkeys due this week" />
+              <SectionEmpty message="No active tasks found" />
             ) : (
               <div className="space-y-2">
                 {myMonkeys.map((task) => {
                   const isOverdue = task.days_overdue > 0;
                   const isDueToday = !isOverdue && task.due_on === todayStr;
+                  const hasDate = !!task.due_on;
                   const urgency: "red" | "amber" | "teal" = isOverdue
                     ? "red"
                     : isDueToday
@@ -915,9 +942,9 @@ export function DigestView() {
                     ? `${task.days_overdue}d overdue`
                     : isDueToday
                     ? "Due today"
-                    : task.due_on
+                    : hasDate
                     ? formatRelativeDay(task.due_on)
-                    : "Upcoming";
+                    : "No date";
                   return (
                     <a
                       key={task.id}
@@ -940,6 +967,8 @@ export function DigestView() {
                               ? "bg-accent-red/15 text-accent-red"
                               : isDueToday
                               ? "bg-accent-amber/15 text-accent-amber"
+                              : !hasDate
+                              ? "bg-white/10 text-text-muted"
                               : "bg-accent-teal/15 text-accent-teal"
                           )}
                         >
