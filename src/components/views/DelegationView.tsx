@@ -279,7 +279,7 @@ export function DelegationView() {
 
   // Persisted dismiss state
   const storageKey = `delegation-center:${userEmail}`;
-  const [persisted, setPersisted] = useState<DelegationPersistedState>({ dismissedIds: [], snoozedUntil: {} });
+  const [persisted, setPersisted] = useState<DelegationPersistedState>({ dismissedIds: [], snoozedUntil: {}, selectedProjects: [] });
 
   useEffect(() => {
     setPersisted(loadPersistedState(storageKey));
