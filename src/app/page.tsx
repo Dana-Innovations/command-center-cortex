@@ -6,15 +6,13 @@ import { Footer } from "@/components/layout/Footer";
 import { PriorityView } from "@/components/views/PriorityView";
 import { SalesTabView } from "@/components/views/SalesTabView";
 import { MetricsView } from "@/components/views/MetricsView";
-import { PeopleView } from "@/components/views/PeopleView";
+import { UnifiedPeopleView } from "@/components/views/UnifiedPeopleView";
 import { CalendarView } from "@/components/views/CalendarView";
 import { SignalsView } from "@/components/views/SignalsView";
 import { MindensView } from "@/components/views/MindensView";
 import { DelegationView } from "@/components/views/DelegationView";
 import { MeetingPrepView } from "@/components/views/MeetingPrepView";
-import { RelationshipView } from "@/components/views/RelationshipView";
 import { DigestView } from "@/components/views/DigestView";
-import { usePeople } from "@/hooks/usePeople";
 import { EODSummary } from "@/components/modals/EODSummary";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
@@ -33,7 +31,6 @@ function HomeContent() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [prepEventId, setPrepEventId] = useState<string | undefined>();
   const { loading, fetchedAt, error, refetch } = useLiveData();
-  const { people, loading: peopleLoading } = usePeople();
 
   const handlePrepNavigate = useCallback((eventId: string) => {
     setPrepEventId(eventId);
@@ -72,8 +69,7 @@ function HomeContent() {
         {activeTab === "priority"  && <PriorityView />}
         {activeTab === "sales"     && <SalesTabView />}
         {activeTab === "metrics"   && <MetricsView />}
-        {activeTab === "people"    && <PeopleView people={people} loading={peopleLoading} />}
-        {activeTab === "relationships" && <RelationshipView />}
+        {activeTab === "people"    && <UnifiedPeopleView />}
         {activeTab === "calendar"  && <CalendarView />}
         {activeTab === "prep"      && <MeetingPrepView initialEventId={prepEventId} />}
         {activeTab === "signals"   && <SignalsView />}

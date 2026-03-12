@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, startTransition } from "react";
 import { cn } from "@/lib/utils";
 import { usePersonDetail } from "@/hooks/usePersonDetail";
 import type { Person } from "@/hooks/usePeople";
+import type { SalesforceOpportunity } from "@/lib/types";
 import type {
   PersonDetailEmail,
   PersonDetailMeeting,
@@ -12,6 +13,11 @@ import type {
   PersonDetailTask,
   PersonDetailResponse,
 } from "@/hooks/usePersonDetail";
+import {
+  HEAT_CONFIG,
+  formatDate as formatDateShort,
+  type Heat,
+} from "@/lib/people-utils";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -29,7 +35,7 @@ const URGENCY_BG: Record<string, string> = {
   gray: "bg-white/10 text-text-muted",
 };
 
-const TABS = ["timeline", "emails", "meetings", "messages", "tasks"] as const;
+const TABS = ["timeline", "emails", "meetings", "messages", "tasks", "salesforce", "notes"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -38,6 +44,8 @@ const TAB_LABELS: Record<Tab, string> = {
   meetings: "Meetings",
   messages: "Messages",
   tasks: "Tasks",
+  salesforce: "Salesforce",
+  notes: "Notes",
 };
 
 interface TimelineItem {
@@ -151,15 +159,33 @@ function computeRelationshipStrength(detail: PersonDetailResponse): {
 interface PersonDetailPanelProps {
   person: Person;
   onClose: () => void;
+  heat?: Heat;
+  heatDays?: number;
+  relatedOpps?: SalesforceOpportunity[];
 }
 
-export function PersonDetailPanel({ person, onClose }: PersonDetailPanelProps) {
+export function PersonDetailPanel({ person, onClose, heat, heatDays: _heatDays, relatedOpps }: PersonDetailPanelProps) {
   const { detail, loading, error, refresh } = usePersonDetail(
     person.name,
     person.email,
     person.teamsChatId
   );
   const [activeTab, setActiveTab] = useState<Tab>("timeline");
+  const [notes, setNotes] = useState("");
+  const storageKey = `rel-notes:${person.name.toLowerCase()}`;
+
+  // Load notes from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) startTransition(() => setNotes(saved));
+    } catch { /* ignore */ }
+  }, [storageKey]);
+
+  const saveNotes = useCallback((val: string) => {
+    setNotes(val);
+    try { localStorage.setItem(storageKey, val); } catch { /* ignore */ }
+  }, [storageKey]);
 
   // Build timeline from all sources
   const timeline: TimelineItem[] = [];
@@ -212,7 +238,15 @@ export function PersonDetailPanel({ person, onClose }: PersonDetailPanelProps) {
     meetings: detail?.meetings.length ?? 0,
     messages: (detail?.chats.length ?? 0) + (detail?.slackMessages.length ?? 0),
     tasks: detail?.tasks.length ?? 0,
+    salesforce: relatedOpps?.length ?? 0,
+    notes: notes.length > 0 ? 1 : 0,
   };
+
+  // Only show salesforce tab if there are related opps
+  const visibleTabs = TABS.filter((t) => {
+    if (t === "salesforce" && (!relatedOpps || relatedOpps.length === 0)) return false;
+    return true;
+  });
 
   const strength = detail ? computeRelationshipStrength(detail) : null;
 
@@ -253,6 +287,17 @@ export function PersonDetailPanel({ person, onClose }: PersonDetailPanelProps) {
                 >
                   {person.urgency}
                 </span>
+                {heat && (
+                  <span
+                    className={cn(
+                      "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
+                      HEAT_CONFIG[heat].bg,
+                      HEAT_CONFIG[heat].color
+                    )}
+                  >
+                    {HEAT_CONFIG[heat].label}
+                  </span>
+                )}
               </div>
               {detail?.identity.title && (
                 <div className="text-xs text-text-muted mt-0.5">
@@ -334,7 +379,7 @@ export function PersonDetailPanel({ person, onClose }: PersonDetailPanelProps) {
 
           {/* Tabs */}
           <div className="flex gap-1 mt-3 -mb-4 pb-0">
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -378,6 +423,12 @@ export function PersonDetailPanel({ person, onClose }: PersonDetailPanelProps) {
               {activeTab === "meetings" && <MeetingsView meetings={detail.meetings} />}
               {activeTab === "messages" && <MessagesView chats={detail.chats} slackMessages={detail.slackMessages} />}
               {activeTab === "tasks" && <TasksView tasks={detail.tasks} />}
+              {activeTab === "salesforce" && relatedOpps && (
+                <SalesforceView opps={relatedOpps} />
+              )}
+              {activeTab === "notes" && (
+                <NotesView notes={notes} onSave={saveNotes} />
+              )}
             </>
           )}
         </div>
@@ -739,6 +790,71 @@ function TasksView({ tasks }: { tasks: PersonDetailTask[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Salesforce ────────────────────────────────────────────────────────────
+
+function SalesforceView({ opps }: { opps: SalesforceOpportunity[] }) {
+  if (opps.length === 0) return <EmptyTab label="opportunities" />;
+
+  return (
+    <div className="space-y-2">
+      {opps.map((opp) => (
+        <div key={opp.id} className="glass-card rounded-lg p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text-heading line-clamp-1">
+                {opp.name}
+              </div>
+              <div className="text-[11px] text-text-muted mt-0.5">
+                {opp.account_name} &middot; {opp.stage}
+              </div>
+            </div>
+            {opp.amount > 0 && (
+              <span className="text-xs font-semibold text-accent-green shrink-0">
+                ${(opp.amount / 1000).toFixed(0)}k
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-text-muted">
+            <span>{opp.probability}% prob</span>
+            {opp.close_date && (
+              <span>close {formatDateShort(opp.close_date)}</span>
+            )}
+            {opp.next_step && (
+              <span className="truncate max-w-[150px]">
+                Next: {opp.next_step}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────
+
+function NotesView({
+  notes,
+  onSave,
+}: {
+  notes: string;
+  onSave: (val: string) => void;
+}) {
+  return (
+    <div>
+      <textarea
+        value={notes}
+        onChange={(e) => onSave(e.target.value)}
+        placeholder="Add private notes about this person..."
+        className="w-full h-40 text-xs bg-white/5 border border-[var(--bg-card-border)] rounded-lg px-3 py-2 text-text-body placeholder:text-text-muted/50 focus:outline-none focus:border-accent-amber/40 transition-colors resize-none"
+      />
+      <div className="text-[10px] text-text-muted mt-1.5">
+        Notes are saved locally in your browser.
+      </div>
     </div>
   );
 }
