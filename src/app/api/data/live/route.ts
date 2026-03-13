@@ -406,9 +406,10 @@ async function fetchCalendar(token: string, sessionId: string) {
     {
       start_date: startDate,
       end_date: endDate,
-      count: 50,
+      limit: 50,
     }
   );
+  console.log("[live] calendar raw keys:", Object.keys(result ?? {}), "event count:", (result?.events ?? result?.value ?? []).length);
   const events: Record<string, unknown>[] = result.events ?? result.value ?? [];
   const synced = new Date().toISOString();
 
