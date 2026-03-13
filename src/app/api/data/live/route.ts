@@ -396,8 +396,8 @@ async function fetchCalendar(token: string, sessionId: string) {
   const now = new Date();
   const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const startDate = start.toISOString().slice(0, 10); // YYYY-MM-DD
-  const endDate = end.toISOString().slice(0, 10);
+  const startDate = start.toISOString();
+  const endDate = end.toISOString();
   const result = await cortexCall(
     token,
     sessionId,
@@ -407,9 +407,14 @@ async function fetchCalendar(token: string, sessionId: string) {
       start_date: startDate,
       end_date: endDate,
       count: 50,
+      limit: 50,
     }
   );
-  console.log("[live] calendar result:", { keys: Object.keys(result ?? {}), eventCount: (result?.events ?? result?.value ?? []).length, startDate, endDate });
+  if (!result || (!result.events && !result.value)) {
+    console.warn("[live] calendar: no events key in response", { keys: Object.keys(result ?? {}), result });
+  } else {
+    console.log("[live] calendar result:", { eventCount: (result.events ?? result.value ?? []).length, startDate, endDate });
+  }
   const events: Record<string, unknown>[] = result.events ?? result.value ?? [];
   const synced = new Date().toISOString();
 

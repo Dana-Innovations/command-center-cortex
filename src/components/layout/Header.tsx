@@ -95,10 +95,10 @@ export function Header({
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-6 py-5">
         {/* Left: greeting + date + clock */}
         <div>
-          <h1 className="font-display text-2xl font-semibold text-text-heading leading-tight">
+          <h1 className="font-display text-2xl font-semibold text-text-heading leading-tight" suppressHydrationWarning>
             {greeting}
           </h1>
-          <p className="text-sm text-text-muted mt-0.5">
+          <p className="text-sm text-text-muted mt-0.5" suppressHydrationWarning>
             {dateStr}
             {clock && <span className="ml-3 tabular-nums">{clock}</span>}
           </p>
