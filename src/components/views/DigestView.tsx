@@ -12,7 +12,7 @@ import { useAsanaComments } from "@/hooks/useAsanaComments";
 import { useLiveData } from "@/lib/live-data-context";
 import { useConnections } from "@/hooks/useConnections";
 import { ConnectedServicesPanel } from "@/components/ui/ConnectedServicesPanel";
-import { toPacificDate } from "@/lib/calendar";
+import { toCalendarEventDate, toPacificDate } from "@/lib/calendar";
 import type { Task, CalendarEvent } from "@/lib/types";
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -33,6 +33,10 @@ const MAX_GORILLAS_DISPLAY = 15;
 
 const GORILLA_KEYWORDS =
   /\b(initiative|launch|program|rollout|strategy|overhaul|transformation|campaign|integration|migration|implementation|pilot)\b/i;
+const WEEK_AHEAD_PRIORITY_KEYWORDS =
+  /\b(slt|quarterly|annual|board|committee|review|strategy|planning|presentation|tour|kickoff|resource|performance|new hire|birthday|monthly|ai|erp|vetri)\b/i;
+const WEEK_AHEAD_ROUTINE_KEYWORDS =
+  /\b(daily stand up|daily recap|blocked|hold\b|massage|haircut|lunch|dinner|possible)\b/i;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +119,12 @@ function formatLocalDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 function formatTimeShort(isoStr: string): string {
   const d = toPacificDate(isoStr);
   if (!d) return "";
@@ -144,6 +154,10 @@ function formatRelativeDay(dateStr: string): string {
 function fmtAmount(n: number | null | undefined) {
   if (!n) return "";
   return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function trimLocation(value: string | null | undefined): string {
+  return (value || "").split("\n")[0].trim();
 }
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -372,6 +386,92 @@ export function DigestView() {
     }
     return groups;
   }, [showUpcoming, upcomingMeetings]);
+
+  interface WeekAheadDay {
+    dateKey: string;
+    label: string;
+    count: number;
+    highlights: CalendarEvent[];
+    moreCount: number;
+  }
+
+  const weekAhead = useMemo<WeekAheadDay[]>(() => {
+    if (!calEvents) return [];
+
+    const tomorrow = addDays(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+      1
+    );
+    const dayMap = new Map<string, { date: Date; scored: Array<{ event: CalendarEvent; score: number; startMs: number }> }>();
+
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(tomorrow, i);
+      dayMap.set(formatLocalDate(date), { date, scored: [] });
+    }
+
+    for (const event of calEvents) {
+      const eventDate = toCalendarEventDate(event.start_time, event.is_all_day);
+      if (!eventDate) continue;
+
+      const bucket = dayMap.get(formatLocalDate(eventDate));
+      if (!bucket) continue;
+
+      const subject = event.subject.toLowerCase();
+      const start = toCalendarEventDate(event.start_time, event.is_all_day);
+      const end = event.is_all_day
+        ? toCalendarEventDate(event.end_time, true)
+        : toPacificDate(event.end_time);
+      const durationMinutes =
+        start && end ? Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000)) : 0;
+
+      let score = 0;
+      if (event.is_all_day) score += 2;
+      if (durationMinutes >= 120) score += 4;
+      else if (durationMinutes >= 60) score += 3;
+      else if (durationMinutes >= 30) score += 2;
+      else if (durationMinutes >= 15) score += 1;
+
+      if (WEEK_AHEAD_PRIORITY_KEYWORDS.test(subject)) score += 4;
+      if (subject.includes("quarterly")) score += 2;
+      if (subject.includes("monthly")) score += 1;
+      if (!isUserMatch(event.organizer)) score += 1;
+      if (WEEK_AHEAD_ROUTINE_KEYWORDS.test(subject)) score -= 4;
+      if (subject.includes("1:1") && !subject.includes("monthly") && !subject.includes("quarterly")) {
+        score -= 1;
+      }
+
+      bucket.scored.push({
+        event,
+        score,
+        startMs: new Date(event.start_time).getTime(),
+      });
+    }
+
+    return Array.from(dayMap.values())
+      .map((bucket) => {
+        const ranked = [...bucket.scored].sort(
+          (a, b) => b.score - a.score || a.startMs - b.startMs
+        );
+        let highlights = ranked.filter((item) => item.score >= 4).slice(0, 2);
+        if (highlights.length === 0 && ranked.length > 0) {
+          highlights = ranked.slice(0, 1);
+        }
+
+        return {
+          dateKey: formatLocalDate(bucket.date),
+          label: bucket.date.toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }),
+          count: bucket.scored.length,
+          highlights: highlights.map((item) => item.event),
+          moreCount: Math.max(0, bucket.scored.length - highlights.length),
+        };
+      })
+      .filter((bucket) => bucket.highlights.length > 0)
+      .slice(0, 5);
+  }, [calEvents, isUserMatch, now]);
 
   const isCurrentMeeting = useCallback(
     (event: CalendarEvent): boolean => {
@@ -986,6 +1086,82 @@ export function DigestView() {
               </div>
             ) : (
               <SectionEmpty message="No meetings this week" />
+            )}
+          </div>}
+
+          {connections.m365 && <div
+            className="glass-card anim-card p-5"
+            style={{ animationDelay: "120ms" }}
+          >
+            <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12h18" /><path d="M3 6h18" /><path d="M3 18h12" />
+              </svg>
+              Week Ahead
+              <span className="text-xs text-text-muted font-normal">
+                ({weekAhead.length})
+              </span>
+            </h2>
+
+            {loading ? (
+              <SectionSkeleton />
+            ) : weekAhead.length === 0 ? (
+              <SectionEmpty message="Nothing major is stacked up in the next week" />
+            ) : (
+              <div className="space-y-3">
+                {weekAhead.map((day) => (
+                  <div
+                    key={day.dateKey}
+                    className="rounded-xl border border-white/6 bg-white/[0.03] p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+                        {day.label}
+                      </p>
+                      <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-text-muted">
+                        {day.count} on calendar
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {day.highlights.map((event) => (
+                        <div
+                          key={event.id}
+                          className="rounded-lg bg-black/10 px-3 py-2.5"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-[72px] shrink-0 pt-0.5 text-xs font-mono tabular-nums text-text-muted">
+                              {event.is_all_day ? "All day" : formatTimeShort(event.start_time)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-text-heading">
+                                {event.subject}
+                              </p>
+                              <p className="mt-0.5 text-xs text-text-muted">
+                                {event.is_all_day
+                                  ? trimLocation(event.location) || event.organizer || "Major calendar anchor"
+                                  : `${formatTimeShort(event.start_time)} – ${formatTimeShort(event.end_time)}${
+                                      trimLocation(event.location)
+                                        ? ` · ${trimLocation(event.location)}`
+                                        : event.organizer
+                                        ? ` · ${event.organizer}`
+                                        : ""
+                                    }`}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {day.moreCount > 0 && (
+                      <p className="mt-2 text-[11px] text-text-muted">
+                        +{day.moreCount} more on the calendar
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>}
 

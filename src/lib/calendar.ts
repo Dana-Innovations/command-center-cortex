@@ -65,6 +65,27 @@ export function normalizeCalendarDateTime(
   return parseCalendarDate(candidate)?.toISOString() ?? null;
 }
 
+export function calendarDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function parseCalendarDateOnly(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const candidate = value.trim().slice(0, 10);
+  if (!DATE_ONLY_RE.test(candidate)) {
+    return null;
+  }
+
+  const [year, month, day] = candidate.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export function toPacificDate(value: string | null | undefined): Date | null {
   const parsed = parseCalendarDate(value);
   if (!parsed) {
@@ -74,4 +95,37 @@ export function toPacificDate(value: string | null | undefined): Date | null {
   return parseCalendarDate(
     parsed.toLocaleString("en-US", { timeZone: PACIFIC_TIME_ZONE })
   );
+}
+
+export function toCalendarEventDate(
+  value: string | null | undefined,
+  isAllDay = false
+): Date | null {
+  return isAllDay ? parseCalendarDateOnly(value) : toPacificDate(value);
+}
+
+export function eventOccursOnDate(
+  startValue: string | null | undefined,
+  endValue: string | null | undefined,
+  isAllDay: boolean,
+  day: Date
+): boolean {
+  const target = parseCalendarDateOnly(calendarDateKey(day));
+  if (!target) {
+    return false;
+  }
+
+  if (!isAllDay) {
+    const start = toPacificDate(startValue);
+    return Boolean(start && calendarDateKey(start) === calendarDateKey(target));
+  }
+
+  const start = parseCalendarDateOnly(startValue);
+  const endExclusive = parseCalendarDateOnly(endValue);
+  if (!start || !endExclusive) {
+    return false;
+  }
+
+  const targetMs = target.getTime();
+  return targetMs >= start.getTime() && targetMs < endExclusive.getTime();
 }

@@ -1,14 +1,35 @@
 "use client";
+
 import { useState, useEffect, useMemo } from "react";
+import { cn } from "@/lib/utils";
 import { MeetingPrep } from "@/components/command-center/MeetingPrep";
 import { WeatherCard } from "@/components/command-center/WeatherCard";
 import { useCalendar } from "@/hooks/useCalendar";
-import { parseCalendarDate, toPacificDate } from "@/lib/calendar";
+import {
+  eventOccursOnDate,
+  parseCalendarDate,
+  toCalendarEventDate,
+  toPacificDate,
+} from "@/lib/calendar";
 import { transformMeetingPrep } from "@/lib/transformers";
 import { CalendarEvent } from "@/lib/types";
 
 function nowPST(): Date {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  return new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+  );
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfWeek(date: Date): Date {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  return start;
 }
 
 function formatTime12(d: Date | null): string {
@@ -24,7 +45,22 @@ function formatTime12(d: Date | null): string {
 }
 
 function formatTimeRange(ev: CalendarEvent): string {
-  return `${formatTime12(toPacificDate(ev.start_time))} \u2013 ${formatTime12(toPacificDate(ev.end_time))}`;
+  return `${formatTime12(toPacificDate(ev.start_time))} – ${formatTime12(toPacificDate(ev.end_time))}`;
+}
+
+function formatWeekRange(start: Date): string {
+  const end = addDays(start, 6);
+  const startLabel = start.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const endLabel = end.toLocaleDateString("en-US", {
+    month: start.getMonth() === end.getMonth() ? undefined : "short",
+    day: "numeric",
+    year: start.getFullYear() === end.getFullYear() ? undefined : "numeric",
+  });
+
+  return `${startLabel} – ${endLabel}`;
 }
 
 function isSameDay(d1: Date, d2: Date): boolean {
@@ -48,7 +84,10 @@ function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
   const isHappening = Boolean(start && end && start <= now && now < end);
 
   return (
-    <div className={`glass-card p-3 flex items-start gap-3 ${isHappening ? "border border-accent-amber/60 shadow-[0_0_12px_rgba(212,164,76,0.15)]" : ""}`}>
+    <div className={cn(
+      "glass-card p-3 flex items-start gap-3",
+      isHappening && "border border-accent-amber/60 shadow-[0_0_12px_rgba(212,164,76,0.15)]"
+    )}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted tabular-nums shrink-0">{formatTimeRange(ev)}</span>
@@ -57,7 +96,11 @@ function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
           )}
         </div>
         <div className="text-sm font-medium text-text-heading mt-0.5">{ev.subject}</div>
-        {ev.location && <div className="text-xs text-text-muted mt-0.5">{ev.location}</div>}
+        {(ev.location || ev.organizer) && (
+          <div className="text-xs text-text-muted mt-0.5">
+            {ev.location || ev.organizer}
+          </div>
+        )}
       </div>
       {ev.join_url && ev.is_online && (
         <a
@@ -73,6 +116,52 @@ function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
   );
 }
 
+function WeekEventChip({ ev, now }: { ev: CalendarEvent; now: Date }) {
+  const start = toPacificDate(ev.start_time);
+  const end = toPacificDate(ev.end_time);
+  const isHappening = Boolean(start && end && start <= now && now < end);
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border p-2.5 transition-colors bg-white/[0.03] border-white/6 hover:bg-white/[0.05]",
+        isHappening && "border-accent-amber/50 bg-accent-amber/10"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-mono text-text-muted tabular-nums">
+          {formatTime12(start)}
+        </span>
+        {isHappening ? (
+          <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-accent-amber">
+            Live
+          </span>
+        ) : ev.is_online ? (
+          <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-accent-teal">
+            Online
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-[13px] font-medium leading-5 text-text-heading line-clamp-2">
+        {ev.subject}
+      </p>
+      {(ev.location || ev.organizer) && (
+        <p className="mt-1 text-[11px] leading-4 text-text-muted line-clamp-2">
+          {ev.location || ev.organizer}
+        </p>
+      )}
+    </div>
+  );
+}
+
+interface DayBucket {
+  date: Date;
+  allDay: CalendarEvent[];
+  timed: CalendarEvent[];
+  count: number;
+  isToday: boolean;
+}
+
 export function CalendarView() {
   const { events: calEvents } = useCalendar();
   const meetingPrep = transformMeetingPrep(calEvents);
@@ -83,50 +172,193 @@ export function CalendarView() {
     return () => clearInterval(timer);
   }, []);
 
-  const { todayAllDay, todayTimed, upcoming } = useMemo(() => {
-    const sorted = [...calEvents]
+  const weekStart = useMemo(() => startOfWeek(now), [now]);
+
+  const sortedEvents = useMemo(() => {
+    return [...calEvents]
       .filter(
         (event) =>
           parseCalendarDate(event.start_time) && parseCalendarDate(event.end_time)
       )
-      .sort(
-        (a, b) =>
-          parseCalendarDate(a.start_time)!.getTime() -
-          parseCalendarDate(b.start_time)!.getTime()
+      .sort((a, b) => {
+        const aStart =
+          toCalendarEventDate(a.start_time, a.is_all_day) ??
+          parseCalendarDate(a.start_time)!;
+        const bStart =
+          toCalendarEventDate(b.start_time, b.is_all_day) ??
+          parseCalendarDate(b.start_time)!;
+        return aStart.getTime() - bStart.getTime();
+      });
+  }, [calEvents]);
+
+  const weekDays = useMemo<DayBucket[]>(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(weekStart, index);
+      const allDay = sortedEvents.filter(
+        (event) =>
+          event.is_all_day &&
+          eventOccursOnDate(event.start_time, event.end_time, true, date)
       );
-    const todayAllDay: CalendarEvent[] = [];
-    const todayTimed: CalendarEvent[] = [];
-    const upcoming: CalendarEvent[] = [];
+      const timed = sortedEvents.filter(
+        (event) =>
+          !event.is_all_day &&
+          eventOccursOnDate(event.start_time, event.end_time, false, date)
+      );
 
-    for (const ev of sorted) {
-      const start = toPacificDate(ev.start_time);
-      if (!start) {
-        continue;
-      }
+      return {
+        date,
+        allDay,
+        timed,
+        count: allDay.length + timed.length,
+        isToday: isSameDay(date, now),
+      };
+    });
+  }, [now, sortedEvents, weekStart]);
 
-      if (isSameDay(start, now)) {
-        if (ev.is_all_day) todayAllDay.push(ev);
-        else todayTimed.push(ev);
-      } else if (start > now) {
-        upcoming.push(ev);
-      }
-    }
-    return { todayAllDay, todayTimed, upcoming };
-  }, [calEvents, now]);
+  const todayBucket = weekDays.find((day) => day.isToday) ?? weekDays[0];
 
-  // NOW marker: insert before the first event whose start_time > now
   const nowInsertBefore = useMemo(() => {
-    for (let i = 0; i < todayTimed.length; i++) {
-      const start = toPacificDate(todayTimed[i].start_time);
+    for (let i = 0; i < todayBucket.timed.length; i++) {
+      const start = toPacificDate(todayBucket.timed[i].start_time);
       if (start && start > now) return i;
     }
-    return todayTimed.length;
-  }, [todayTimed, now]);
+    return todayBucket.timed.length;
+  }, [todayBucket.timed, now]);
+
+  const weekEventCount = useMemo(
+    () => weekDays.reduce((sum, day) => sum + day.count, 0),
+    [weekDays]
+  );
+
+  const busyDays = useMemo(
+    () => weekDays.filter((day) => day.count > 0).length,
+    [weekDays]
+  );
+
+  const onlineMeetings = useMemo(
+    () =>
+      weekDays.reduce(
+        (sum, day) => sum + day.timed.filter((event) => event.is_online).length,
+        0
+      ),
+    [weekDays]
+  );
 
   return (
     <div className="space-y-5">
+      <section className="glass-card anim-card p-5" style={{ animationDelay: "80ms" }}>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-text-heading">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              Week at a Glance
+            </h2>
+            <p className="mt-1 text-xs text-text-muted">
+              {formatWeekRange(weekStart)} · Live from Outlook
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            {[
+              { label: "Events", value: weekEventCount },
+              { label: "Busy Days", value: busyDays },
+              { label: "Online", value: onlineMeetings },
+            ].map((stat) => (
+              <div key={stat.label} className="rounded-xl bg-white/[0.03] px-3 py-2 text-center min-w-[82px]">
+                <p className="text-lg font-semibold tabular-nums text-text-heading">
+                  {stat.value}
+                </p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-text-muted">
+                  {stat.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 overflow-x-auto pb-2">
+          <div className="grid min-w-[1120px] grid-cols-7 gap-3">
+            {weekDays.map((day) => (
+              <div
+                key={day.date.toISOString()}
+                className={cn(
+                  "rounded-2xl border p-3 min-h-[340px] bg-white/[0.02]",
+                  day.isToday
+                    ? "border-accent-teal/40 bg-accent-teal/[0.06]"
+                    : "border-white/6"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <p
+                      className={cn(
+                        "text-[10px] font-semibold uppercase tracking-[0.2em]",
+                        day.isToday ? "text-accent-teal" : "text-text-muted"
+                      )}
+                    >
+                      {day.date.toLocaleDateString("en-US", { weekday: "short" })}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-text-heading">
+                      {day.date.toLocaleDateString("en-US", { day: "numeric" })}
+                    </p>
+                    <p className="text-[11px] text-text-muted">
+                      {day.date.toLocaleDateString("en-US", { month: "short" })}
+                    </p>
+                  </div>
+
+                  <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-text-muted">
+                    {day.count}
+                  </span>
+                </div>
+
+                {day.allDay.length > 0 && (
+                  <div className="mb-3 space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent-amber">
+                      All Day
+                    </p>
+                    {day.allDay.map((event) => (
+                      <div
+                        key={`${event.id}-${day.date.toISOString()}-all-day`}
+                        className="rounded-xl bg-accent-amber/10 px-2.5 py-2 border border-accent-amber/20"
+                      >
+                        <p className="text-[12px] font-medium leading-5 text-text-heading line-clamp-2">
+                          {event.subject}
+                        </p>
+                        {event.location && (
+                          <p className="mt-1 text-[11px] text-text-muted line-clamp-2">
+                            {event.location}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {day.timed.length > 0 ? (
+                  <div className="space-y-2">
+                    {day.timed.map((event) => (
+                      <WeekEventChip key={`${event.id}-${day.date.toISOString()}`} ev={event} now={now} />
+                    ))}
+                  </div>
+                ) : day.allDay.length === 0 ? (
+                  <div className="flex h-[180px] items-center justify-center rounded-xl border border-dashed border-white/8 text-center">
+                    <p className="px-4 text-[11px] uppercase tracking-[0.18em] text-text-muted">
+                      Clear
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
-        {/* Today */}
         <section className="glass-card anim-card p-5" style={{ animationDelay: "160ms" }}>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-text-heading mb-4">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -138,9 +370,8 @@ export function CalendarView() {
             Today
           </h2>
 
-          {/* All-day events */}
-          {todayAllDay.map((ev) => (
-            <div key={ev.id} className="glass-card p-3 mb-2 flex items-center gap-3">
+          {todayBucket.allDay.map((ev) => (
+            <div key={`${ev.id}-today`} className="glass-card p-3 mb-2 flex items-center gap-3">
               <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-amber/15 text-accent-amber shrink-0">
                 All day
               </span>
@@ -149,86 +380,23 @@ export function CalendarView() {
             </div>
           ))}
 
-          {todayTimed.length === 0 && todayAllDay.length === 0 && (
+          {todayBucket.timed.length === 0 && todayBucket.allDay.length === 0 && (
             <div className="text-sm text-text-muted text-center py-6">No events today</div>
           )}
 
-          {/* Timed events with NOW marker */}
           <div className="space-y-2">
-            {todayTimed.map((ev, i) => (
+            {todayBucket.timed.map((ev, i) => (
               <div key={ev.id}>
                 {i === nowInsertBefore && <NowMarker />}
                 <EventCard ev={ev} now={now} />
               </div>
             ))}
-            {nowInsertBefore === todayTimed.length && todayTimed.length > 0 && <NowMarker />}
+            {nowInsertBefore === todayBucket.timed.length && todayBucket.timed.length > 0 && <NowMarker />}
           </div>
         </section>
 
         <WeatherCard />
       </div>
-
-      {/* Upcoming */}
-      {upcoming.length > 0 && (
-        <section className="glass-card p-5">
-          <h2 className="text-sm font-semibold text-text-heading mb-4 flex items-center gap-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            Upcoming
-          </h2>
-          <div className="space-y-2">
-            {(() => {
-              const grouped: { label: string; events: typeof upcoming }[] = [];
-              for (const ev of upcoming.slice(0, 10)) {
-                const start = toPacificDate(ev.start_time);
-                if (!start) {
-                  continue;
-                }
-
-                const label = start.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
-                const last = grouped[grouped.length - 1];
-                if (last && last.label === label) {
-                  last.events.push(ev);
-                } else {
-                  grouped.push({ label, events: [ev] });
-                }
-              }
-              return grouped.map((group) => (
-                <div key={group.label}>
-                  <div className="text-xs font-semibold text-text-heading mt-3 mb-2 first:mt-0">{group.label}</div>
-                  <div className="space-y-2">
-                    {group.events.map((ev) => (
-                      <div key={ev.id} className="glass-card p-3 flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-text-muted tabular-nums">
-                              {ev.is_all_day ? "All day" : formatTimeRange(ev)}
-                            </span>
-                          </div>
-                          <div className="text-sm font-medium text-text-heading mt-0.5">{ev.subject}</div>
-                          {ev.location && <div className="text-xs text-text-muted mt-0.5">{ev.location}</div>}
-                        </div>
-                        {ev.join_url && ev.is_online && (
-                          <a
-                            href={ev.join_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md bg-accent-teal/15 text-accent-teal hover:bg-accent-teal/25 transition-colors"
-                          >
-                            Join
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
-        </section>
-      )}
 
       <MeetingPrep meetings={meetingPrep} />
     </div>
