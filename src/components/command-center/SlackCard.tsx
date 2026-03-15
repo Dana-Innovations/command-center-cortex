@@ -1,14 +1,32 @@
 "use client";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AttentionFeedbackControl } from "@/components/ui/AttentionFeedbackControl";
 import { ConnectPrompt } from "@/components/ui/ConnectPrompt";
 import { SlackIcon } from "@/components/ui/icons";
 import { useSlackFeed } from "@/hooks/useSlackFeed";
+import { useAttention } from "@/lib/attention/client";
+import { buildSlackAttentionTarget } from "@/lib/attention/targets";
 import { useConnections } from "@/hooks/useConnections";
 
 export function SlackCard() {
   const { messages, loading } = useSlackFeed();
   const { slack: slackConnected } = useConnections();
+  const { applyTarget } = useAttention();
+
+  const rankedMessages = messages
+    .map((message) => {
+      const target = buildSlackAttentionTarget(message, "signals", 32);
+      const attention = applyTarget(target);
+      return { message, target, attention };
+    })
+    .filter((item) => !item.attention.hidden)
+    .sort(
+      (a, b) =>
+        b.attention.finalScore - a.attention.finalScore ||
+        new Date(b.message.timestamp).getTime() -
+          new Date(a.message.timestamp).getTime()
+    );
 
   return (
     <section className="glass-card anim-card" style={{ animationDelay: "80ms" }}>
@@ -17,19 +35,19 @@ export function SlackCard() {
         Slack
         {slackConnected && (
           <span className="inline-flex items-center rounded-full bg-[rgba(90,199,139,0.12)] text-accent-green px-2 py-0.5 text-xs font-medium">
-            {messages.length} messages
+            {rankedMessages.length} messages
           </span>
         )}
       </h2>
       {!slackConnected ? (
         <ConnectPrompt service="Slack" />
-      ) : loading && messages.length === 0 ? (
+      ) : loading && rankedMessages.length === 0 ? (
         <div className="text-sm text-text-muted animate-pulse py-4 text-center">Loading Slack…</div>
-      ) : messages.length === 0 ? (
+      ) : rankedMessages.length === 0 ? (
         <EmptyState />
       ) : (
       <div className="space-y-0 divide-y divide-[var(--bg-card-border)]">
-        {messages.slice(0, 8).map((msg, i) => (
+        {rankedMessages.slice(0, 8).map(({ message: msg, target, attention }, i) => (
           <div
             key={msg.id || i}
             className={cn(
@@ -47,18 +65,28 @@ export function SlackCard() {
                 {msg.thread_reply_count > 0 && (
                   <span className="text-xs text-text-muted ml-2">{msg.thread_reply_count} replies</span>
                 )}
+                {attention.explanation.length > 0 && (
+                  <div className="mt-1 text-[11px] text-text-muted">{attention.explanation.join(" · ")}</div>
+                )}
               </div>
             </div>
-            {msg.permalink && (
-              <a
-                href={msg.permalink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 text-xs text-text-muted hover:text-accent-amber transition-colors px-2 py-1 rounded-md hover:bg-[var(--accent-amber-dim)] cursor-pointer"
-              >
-                Open
-              </a>
-            )}
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <AttentionFeedbackControl
+                target={target}
+                surface="signals"
+                compact
+              />
+              {msg.permalink && (
+                <a
+                  href={msg.permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-xs text-text-muted hover:text-accent-amber transition-colors px-2 py-1 rounded-md hover:bg-[var(--accent-amber-dim)] cursor-pointer"
+                >
+                  Open
+                </a>
+              )}
+            </div>
           </div>
         ))}
       </div>

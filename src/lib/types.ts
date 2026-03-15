@@ -9,6 +9,7 @@ export interface Email {
   received_at: string;
   is_read: boolean;
   folder: string;
+  folder_id?: string;
   has_attachments: boolean;
   outlook_url: string;
   needs_reply: boolean;
@@ -23,6 +24,7 @@ export interface CalendarEvent {
   id: string;
   event_id: string;
   subject: string;
+  calendar_id?: string;
   location: string;
   start_time: string;
   end_time: string;
@@ -95,11 +97,27 @@ export interface Chat {
   messages?: ChatMessage[];
 }
 
+export interface TeamsChannelMessage {
+  id: string;
+  message_id?: string | null;
+  team_id: string;
+  team_name: string;
+  channel_id: string;
+  channel_name: string;
+  author_name: string;
+  text: string;
+  timestamp: string;
+  reply_count: number;
+  web_url?: string;
+  synced_at: string;
+}
+
 export interface AsanaCommentThread {
   id: string;
   task_gid: string;
   task_name: string;
   task_due_on: string | null;
+  project_gid?: string | null;
   project_name: string;
   permalink_url: string;
   latest_comment_text: string;

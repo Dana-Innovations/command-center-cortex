@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { AttentionFeedbackControl } from "@/components/ui/AttentionFeedbackControl";
 import {
   useGlobalSearch,
   type SearchCategory,
@@ -95,10 +96,13 @@ export function GlobalSearch({ isOpen, onClose, onNavigate }: GlobalSearchProps)
   const listRef = useRef<HTMLDivElement>(null);
 
   // Build flat list for keyboard navigation
-  const flatResults: SearchResult[] = [];
-  for (const cat of CATEGORY_ORDER) {
-    flatResults.push(...grouped[cat]);
-  }
+  const flatResults = useMemo(() => {
+    const next: SearchResult[] = [];
+    for (const cat of CATEGORY_ORDER) {
+      next.push(...grouped[cat]);
+    }
+    return next;
+  }, [grouped]);
 
   // Reset state on open
   useEffect(() => {
@@ -267,7 +271,7 @@ export function GlobalSearch({ isOpen, onClose, onNavigate }: GlobalSearchProps)
                       const isSelected = thisIdx === selectedIndex;
 
                       return (
-                        <button
+                        <div
                           key={result.id}
                           data-selected={isSelected}
                           className={cn(
@@ -276,13 +280,16 @@ export function GlobalSearch({ isOpen, onClose, onNavigate }: GlobalSearchProps)
                               ? "bg-[var(--tab-active-bg)] text-accent-amber"
                               : "text-text-body hover:bg-[var(--tab-bg)]"
                           )}
-                          onClick={() => handleSelect(result)}
                           onMouseEnter={() => setSelectedIndex(thisIdx)}
                         >
                           <span className={cn("shrink-0 opacity-60", meta.color)}>
                             {meta.icon}
                           </span>
-                          <div className="flex-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => handleSelect(result)}
+                            className="min-w-0 flex-1 text-left"
+                          >
                             <div className="font-medium truncate">
                               {result.title}
                             </div>
@@ -291,13 +298,25 @@ export function GlobalSearch({ isOpen, onClose, onNavigate }: GlobalSearchProps)
                                 {result.subtitle}
                               </div>
                             )}
-                          </div>
+                            {result.focusExplanation && result.focusExplanation.length > 0 && (
+                              <div className="text-[11px] text-text-muted truncate">
+                                {result.focusExplanation.join(" · ")}
+                              </div>
+                            )}
+                          </button>
+                          {result.attentionTarget && (
+                            <AttentionFeedbackControl
+                              target={result.attentionTarget}
+                              surface="search"
+                              compact
+                            />
+                          )}
                           {isSelected && (
                             <kbd className="hidden sm:inline-flex items-center rounded-md border border-[var(--bg-card-border)] px-1.5 py-0.5 text-[10px] text-text-muted font-mono">
                               ↵
                             </kbd>
                           )}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>

@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { SyncIndicator } from "@/components/ui/SyncIndicator";
 import { CommandBar, type CommandItem } from "@/components/ui/CommandBar";
 import { useAuth } from "@/hooks/useAuth";
+import { useAttention } from "@/lib/attention/client";
 import { useLiveData } from "@/lib/live-data-context";
-import { ConnectedServicesPanel } from "@/components/ui/ConnectedServicesPanel";
 
 interface HeaderProps {
   onRefresh?: () => void;
@@ -27,11 +27,11 @@ export function Header({
 }: HeaderProps) {
   const { user, signOut } = useAuth();
   const { loading, error } = useLiveData();
+  const { openStudio } = useAttention();
   const [greeting, setGreeting] = useState("");
   const [dateStr, setDateStr] = useState("");
   const [clock, setClock] = useState("");
   const [commandBarOpen, setCommandBarOpen] = useState(false);
-  const [servicesOpen, setServicesOpen] = useState(false);
 
   const userInitial = user?.user_metadata?.full_name?.[0] ?? user?.email?.[0] ?? "?";
   const userName = user?.user_metadata?.full_name ?? user?.email ?? "";
@@ -169,7 +169,7 @@ export function Header({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setServicesOpen(true)}
+            onClick={() => openStudio("connections")}
             aria-label="Connected services"
             title="Manage connected services"
           >
@@ -204,13 +204,6 @@ export function Header({
           </button>
         </div>
       </header>
-
-      {/* Connected Services Panel */}
-      <ConnectedServicesPanel
-        open={servicesOpen}
-        onClose={() => setServicesOpen(false)}
-      />
-
       {/* Command Bar */}
       <CommandBar
         items={commandItems}

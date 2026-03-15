@@ -19,6 +19,7 @@ import type {
   SalesforceOpportunity,
   Chat,
   SlackFeedMessage,
+  TeamsChannelMessage,
 } from "./types";
 
 export interface ConnectionStatus {
@@ -39,6 +40,7 @@ interface LiveDataState {
   asanaProjects: AsanaProject[];
   opportunities: SalesforceOpportunity[];
   chats: Chat[];
+  teamsChannelMessages: TeamsChannelMessage[];
   slack: SlackFeedMessage[];
   powerbi: { reports: unknown[]; kpis: unknown[] };
   connections: ConnectionStatus;
@@ -101,6 +103,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [asanaProjects, setAsanaProjects] = useState<AsanaProject[]>([]);
   const [opportunities, setOpportunities] = useState<SalesforceOpportunity[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
+  const [teamsChannelMessages, setTeamsChannelMessages] = useState<TeamsChannelMessage[]>([]);
   const [slack, setSlack] = useState<SlackFeedMessage[]>([]);
   const [powerbi, setPowerbi] = useState<{ reports: unknown[]; kpis: unknown[] }>({ reports: [], kpis: [] });
   const [connections, setConnections] = useState<ConnectionStatus>({ m365: false, asana: false, slack: false, salesforce: false, powerbi: false, monday: false });
@@ -268,19 +271,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
 
       const request = (async () => {
         try {
-          let apiUrl = "/api/data/live";
-          try {
-            const stored = window.localStorage.getItem("my-monkeys:project-filter");
-            if (stored) {
-              const gids: string[] = JSON.parse(stored);
-              if (Array.isArray(gids) && gids.length > 0) {
-                apiUrl += `?projectGids=${gids.join(",")}`;
-              }
-            }
-          } catch {
-            // ignore localStorage errors
-          }
-          const res = await fetch(apiUrl, { cache: "no-store" });
+          const res = await fetch("/api/data/live", { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data = await res.json();
@@ -304,6 +295,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
             }
             setOpportunities((data.pipeline ?? []) as SalesforceOpportunity[]);
             setChats((data.chats ?? []) as Chat[]);
+            setTeamsChannelMessages((data.teamsChannelMessages ?? []) as TeamsChannelMessage[]);
             setSlack((data.slack ?? []) as SlackFeedMessage[]);
             if (data.powerbi) {
               setPowerbi(data.powerbi as { reports: unknown[]; kpis: unknown[] });
@@ -451,8 +443,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         asanaComments,
         asanaProjects,
         opportunities,
-        chats,
-        slack,
+    chats,
+    teamsChannelMessages,
+    slack,
         powerbi,
         connections,
         loading,

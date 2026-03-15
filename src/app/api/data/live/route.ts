@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loadAttentionProfile } from "@/lib/attention/server";
+import type {
+  AttentionProvider,
+  FocusPreferenceRecord,
+  ImportanceTier,
+} from "@/lib/attention/types";
 import {
   getCortexToken,
   cortexInit,
@@ -6,6 +12,7 @@ import {
   callCortexMCP,
 } from "@/lib/cortex/client";
 import { getConnections, type CortexConnection } from "@/lib/cortex/connections";
+import { getCortexUserFromRequest } from "@/lib/cortex/user";
 import { normalizeCalendarDateTime } from "@/lib/calendar";
 import type { AsanaCommentThread, Task } from "@/lib/types";
 
@@ -29,6 +36,22 @@ interface AsanaPerson {
   email: string;
 }
 
+interface FocusSelection {
+  entityId: string;
+  importance: ImportanceTier;
+  label: string;
+  metadata: Record<string, unknown>;
+}
+
+interface LiveAttentionSelections {
+  providerImportance: Partial<Record<AttentionProvider, ImportanceTier>>;
+  mailFolders: FocusSelection[];
+  asanaProjects: FocusSelection[];
+  slackChannels: FocusSelection[];
+  teamsTeams: FocusSelection[];
+  teamsChannels: FocusSelection[];
+}
+
 function parseCortexUser(request: NextRequest): AuthenticatedUser {
   const raw = request.cookies.get("cortex_user")?.value;
   if (!raw) {
@@ -44,6 +67,138 @@ function parseCortexUser(request: NextRequest): AuthenticatedUser {
   } catch {
     return { name: "", email: "" };
   }
+}
+
+const IMPORTANCE_PRIORITY: Record<ImportanceTier, number> = {
+  critical: 3,
+  normal: 2,
+  quiet: 1,
+  muted: 0,
+};
+
+const MAIL_FOLDER_ALIASES: Record<string, string> = {
+  inbox: "inbox",
+  "sent items": "sentitems",
+  sentitems: "sentitems",
+  sent: "sentitems",
+  archive: "archive",
+  drafts: "drafts",
+  "deleted items": "deleteditems",
+  deleteditems: "deleteditems",
+  trash: "deleteditems",
+  "junk email": "junkemail",
+  junkemail: "junkemail",
+  spam: "junkemail",
+};
+
+function toMetadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function sortSelections(values: FocusSelection[]) {
+  return [...values].sort((a, b) => {
+    const importanceDiff =
+      IMPORTANCE_PRIORITY[b.importance] - IMPORTANCE_PRIORITY[a.importance];
+    if (importanceDiff !== 0) return importanceDiff;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function collectAttentionSelections(
+  records: FocusPreferenceRecord[]
+): LiveAttentionSelections {
+  const selections: LiveAttentionSelections = {
+    providerImportance: {},
+    mailFolders: [],
+    asanaProjects: [],
+    slackChannels: [],
+    teamsTeams: [],
+    teamsChannels: [],
+  };
+
+  for (const record of records) {
+    if (record.entity_type === "provider") {
+      selections.providerImportance[record.provider] = record.importance;
+      continue;
+    }
+
+    const selection: FocusSelection = {
+      entityId: record.entity_id,
+      importance: record.importance,
+      label:
+        record.label_snapshot ||
+        String(record.metadata?.displayName ?? record.entity_id),
+      metadata: toMetadataRecord(record.metadata),
+    };
+
+    if (record.provider === "outlook_mail" && record.entity_type === "mail_folder") {
+      selections.mailFolders.push(selection);
+    } else if (record.provider === "asana" && record.entity_type === "asana_project") {
+      selections.asanaProjects.push(selection);
+    } else if (record.provider === "slack" && record.entity_type === "slack_channel") {
+      selections.slackChannels.push(selection);
+    } else if (record.provider === "teams" && record.entity_type === "teams_team") {
+      selections.teamsTeams.push(selection);
+    } else if (record.provider === "teams" && record.entity_type === "teams_channel") {
+      selections.teamsChannels.push(selection);
+    }
+  }
+
+  selections.mailFolders = sortSelections(selections.mailFolders);
+  selections.asanaProjects = sortSelections(selections.asanaProjects);
+  selections.slackChannels = sortSelections(selections.slackChannels);
+  selections.teamsTeams = sortSelections(selections.teamsTeams);
+  selections.teamsChannels = sortSelections(selections.teamsChannels);
+
+  return selections;
+}
+
+function getProviderImportance(
+  selections: LiveAttentionSelections,
+  provider: AttentionProvider
+) {
+  return selections.providerImportance[provider] ?? "normal";
+}
+
+function shouldSkipProvider(
+  selections: LiveAttentionSelections,
+  provider: AttentionProvider
+) {
+  return getProviderImportance(selections, provider) === "muted";
+}
+
+function selectionLimit(importance: ImportanceTier, limits?: {
+  critical?: number;
+  normal?: number;
+  quiet?: number;
+  muted?: number;
+}) {
+  const fallback = {
+    critical: 40,
+    normal: 24,
+    quiet: 10,
+    muted: 0,
+    ...limits,
+  };
+
+  return fallback[importance];
+}
+
+function resolveMailFolderName(selection: FocusSelection) {
+  const rawLabel =
+    String(selection.metadata.displayName ?? selection.label ?? selection.entityId)
+      .trim()
+      .replace(/^#/, "");
+  const normalized = rawLabel.toLowerCase();
+  return MAIL_FOLDER_ALIASES[normalized] ?? rawLabel;
+}
+
+function resolveSlackChannelName(selection: FocusSelection) {
+  return String(selection.metadata.channelName ?? selection.label ?? selection.entityId)
+    .trim()
+    .replace(/^#/, "");
 }
 
 function normalizeIdentity(value: string | null | undefined): string {
@@ -307,24 +462,87 @@ function extractStories(payload: Record<string, unknown>): Record<string, unknow
 
 // ─── M365 via Cortex MCP ────────────────────────────────────────────────────
 
-async function fetchEmails(token: string, sessionId: string) {
-  const result = await cortexCall(
-    token,
-    sessionId,
-    "emails",
-    "m365__list_emails",
-    { count: 60, folder: "inbox" }
+async function fetchEmails(
+  token: string,
+  sessionId: string,
+  folderSelections: FocusSelection[] = []
+) {
+  const selectedFolders = folderSelections.filter(
+    (selection) => selection.importance !== "muted"
   );
-  const emails: Record<string, unknown>[] = result.emails ?? result.value ?? [];
-  const now = new Date().toISOString();
+  const foldersToFetch =
+    selectedFolders.length > 0
+      ? selectedFolders.slice(0, 4).map((selection) => ({
+          id: selection.entityId,
+          label:
+            String(selection.metadata.displayName ?? selection.label ?? "Inbox") ||
+            "Inbox",
+          requestFolder: resolveMailFolderName(selection),
+          importance: selection.importance,
+        }))
+      : [
+          {
+            id: "inbox",
+            label: "Inbox",
+            requestFolder: "inbox",
+            importance: "normal" as const,
+          },
+        ];
 
-  return emails
-    .filter(
-      (m) =>
-        (m.inferenceClassification === "focused" || !m.inferenceClassification) &&
-        !m.isDraft
+  const results = await Promise.allSettled(
+    foldersToFetch.map((folder, index) =>
+      cortexCall(token, sessionId, `emails_${index}`, "m365__list_emails", {
+        count: selectionLimit(folder.importance, {
+          critical: 48,
+          normal: 28,
+          quiet: 12,
+        }),
+        folder: folder.requestFolder,
+      }).then((result) => ({ folder, result }))
     )
-    .slice(0, 40)
+  );
+
+  const now = new Date().toISOString();
+  const seen = new Set<string>();
+  const items: Array<Record<string, unknown>> = [];
+  const shouldFilterFocused =
+    selectedFolders.length === 0 &&
+    foldersToFetch.length === 1 &&
+    foldersToFetch[0].requestFolder === "inbox";
+
+  for (const outcome of results) {
+    if (outcome.status !== "fulfilled") continue;
+
+    const { folder, result } = outcome.value;
+    const emails: Record<string, unknown>[] = result.emails ?? result.value ?? [];
+
+    for (const message of emails) {
+      const messageId = String(message.id ?? "");
+      if (!messageId || seen.has(messageId) || message.isDraft) continue;
+      if (
+        shouldFilterFocused &&
+        message.inferenceClassification &&
+        message.inferenceClassification !== "focused"
+      ) {
+        continue;
+      }
+
+      seen.add(messageId);
+      items.push({
+        ...message,
+        __folderId: folder.id,
+        __folderLabel: folder.label,
+      });
+    }
+  }
+
+  return items
+    .sort(
+      (a, b) =>
+        new Date(String(b.receivedDateTime ?? now)).getTime() -
+        new Date(String(a.receivedDateTime ?? now)).getTime()
+    )
+    .slice(0, 50)
     .map((m) => {
       const from = m.from as {
         emailAddress?: { name?: string; address?: string };
@@ -344,9 +562,12 @@ async function fetchEmails(token: string, sessionId: string) {
         body_html: "",
         received_at: receivedAt,
         is_read: m.isRead as boolean,
-        folder: "focused",
+        folder: (m.__folderLabel as string) || "Inbox",
+        folder_id: (m.__folderId as string) || "inbox",
         has_attachments: m.hasAttachments as boolean,
-        outlook_url: m.webLink || `https://outlook.office.com/mail/inbox/id/${encodeURIComponent(m.id as string)}`,
+        outlook_url:
+          m.webLink ||
+          `https://outlook.office.com/mail/inbox/id/${encodeURIComponent(m.id as string)}`,
         needs_reply: !(m.isRead as boolean),
         days_overdue: Math.max(0, daysDiff - 2),
         synced_at: now,
@@ -397,7 +618,11 @@ async function fetchSentEmails(token: string, sessionId: string) {
     });
 }
 
-async function fetchCalendar(token: string, sessionId: string) {
+async function fetchCalendar(
+  token: string,
+  sessionId: string,
+  importance: ImportanceTier = "normal"
+) {
   const now = new Date();
   const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -406,7 +631,11 @@ async function fetchCalendar(token: string, sessionId: string) {
   const calendarArgs = {
     start_date: startDate,
     end_date: endDate,
-    count: 200,
+    count: selectionLimit(importance, {
+      critical: 240,
+      normal: 180,
+      quiet: 90,
+    }),
   };
 
   let result: Record<string, unknown> = {};
@@ -498,6 +727,7 @@ async function fetchCalendar(token: string, sessionId: string) {
         id: e.id,
         event_id: e.id,
         subject: e.subject || "(no title)",
+        calendar_id: "primary",
         location: loc?.displayName || (typeof e.location === "string" ? e.location : ""),
         start_time: normalizedStart,
         end_time: normalizedEnd,
@@ -515,7 +745,11 @@ async function fetchCalendar(token: string, sessionId: string) {
 
 // ─── Asana via Cortex MCP ─────────────────────────────────────────────────
 
-async function fetchAsanaTasks(token: string, sessionId: string, filterGids?: string[]) {
+async function fetchAsanaTasks(
+  token: string,
+  sessionId: string,
+  selectedProjects: FocusSelection[] = []
+) {
   // Step 1: Discover the user's projects dynamically
   const projectsResult = await cortexCall(
     token,
@@ -536,22 +770,43 @@ async function fetchAsanaTasks(token: string, sessionId: string, filterGids?: st
   }));
 
   // Step 2: Determine which projects to fetch tasks from
-  let projectSlice: Record<string, unknown>[];
-  if (filterGids && filterGids.length > 0) {
-    projectSlice = projects.filter((p) =>
-      filterGids.includes((p.gid || p.id) as string)
-    );
-    // Fallback to first 5 if none of the filtered GIDs matched
-    if (projectSlice.length === 0) projectSlice = projects.slice(0, 5);
-  } else {
-    projectSlice = projects.slice(0, 5);
+  const selectedProjectIds = new Set(
+    selectedProjects
+      .filter((project) => project.importance !== "muted")
+      .map((project) => project.entityId)
+  );
+
+  let projectSlice: Array<Record<string, unknown> & { __importance?: ImportanceTier }> = [];
+  if (selectedProjectIds.size > 0) {
+    projectSlice = projects
+      .filter((project) => selectedProjectIds.has(String(project.gid || project.id || "")))
+      .map((project) => {
+        const selection = selectedProjects.find(
+          (item) => item.entityId === String(project.gid || project.id || "")
+        );
+        return {
+          ...project,
+          __importance: selection?.importance ?? "normal",
+        };
+      });
+  }
+
+  if (projectSlice.length === 0) {
+    projectSlice = projects.slice(0, 5).map((project) => ({
+      ...project,
+      __importance: "normal" as const,
+    }));
   }
 
   const taskResults = await Promise.allSettled(
     projectSlice.map((p) =>
       cortexCall(token, sessionId, `asana_${p.gid}`, "asana__list_tasks", {
         project_gid: (p.gid || p.id) as string,
-        limit: 50,
+        limit: selectionLimit(p.__importance ?? "normal", {
+          critical: 60,
+          normal: 36,
+          quiet: 18,
+        }),
       })
     )
   );
@@ -800,6 +1055,7 @@ async function fetchAsanaCommentThreads(
         task_gid: task.task_gid,
         task_name: task.name,
         task_due_on: task.due_on || null,
+        project_gid: task.project_gid || null,
         project_name: task.project_name,
         permalink_url: task.permalink_url,
         latest_comment_text: latestComment.text,
@@ -919,41 +1175,193 @@ async function fetchTeamsChats(token: string, sessionId: string) {
     });
 }
 
+async function fetchTeamsChannelMessages(
+  token: string,
+  sessionId: string,
+  teamSelections: FocusSelection[] = [],
+  channelSelections: FocusSelection[] = []
+) {
+  const explicitChannels = channelSelections
+    .filter((selection) => selection.importance !== "muted")
+    .slice(0, 6)
+    .map((selection) => ({
+      teamId: String(selection.metadata.teamId ?? ""),
+      teamName: String(
+        selection.metadata.teamName ?? selection.metadata.teamLabel ?? "Team"
+      ),
+      channelId: selection.entityId,
+      channelName: String(
+        selection.metadata.channelName ?? selection.label ?? "Channel"
+      ).replace(/^#/, ""),
+      importance: selection.importance,
+    }))
+    .filter((selection) => selection.teamId && selection.channelId);
+
+  let channelsToFetch = explicitChannels;
+
+  if (channelsToFetch.length === 0) {
+    const candidateTeams = teamSelections
+      .filter((selection) => selection.importance !== "muted")
+      .slice(0, 3);
+
+    const teamChannels = await Promise.allSettled(
+      candidateTeams.map(async (team) => {
+        const result = await cortexCall(
+          token,
+          sessionId,
+          `team_channels_${team.entityId}`,
+          "m365__list_channels",
+          { team_id: team.entityId }
+        );
+
+        const channels: Record<string, unknown>[] =
+          result.channels ?? result.value ?? [];
+
+        return channels
+          .slice(0, team.importance === "critical" ? 3 : 2)
+          .map((channel) => ({
+            teamId: team.entityId,
+            teamName: String(team.label || "Team"),
+            channelId: String(channel.id ?? ""),
+            channelName: String(channel.displayName ?? "Channel"),
+            importance: team.importance,
+          }))
+          .filter((channel) => channel.channelId);
+      })
+    );
+
+    channelsToFetch = teamChannels.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : []
+    );
+  }
+
+  if (channelsToFetch.length === 0) {
+    return [];
+  }
+
+  const now = new Date().toISOString();
+  const responses = await Promise.allSettled(
+    channelsToFetch.map(async (channel, index) => {
+      const result = await cortexCall(
+        token,
+        sessionId,
+        `team_messages_${index}`,
+        "m365__list_channel_messages",
+        {
+          team_id: channel.teamId,
+          channel_id: channel.channelId,
+          count: selectionLimit(channel.importance, {
+            critical: 6,
+            normal: 4,
+            quiet: 2,
+          }),
+        }
+      );
+
+      return { channel, messages: firstArrayProperty(result, ["messages", "value", "data"]) };
+    })
+  );
+
+  const items: Record<string, unknown>[] = [];
+  for (const response of responses) {
+    if (response.status !== "fulfilled") continue;
+
+    const { channel, messages } = response.value;
+    for (const message of messages) {
+      const body = message.body as { content?: string } | null;
+      const fromUser = (message.from as Record<string, unknown> | null)?.user as
+        | Record<string, unknown>
+        | undefined;
+      const text = stripHtml(body?.content || String(message.summary ?? ""));
+      if (!text) continue;
+
+      items.push({
+        id: `${channel.channelId}:${message.id ?? message.etag ?? message.createdDateTime ?? Math.random()}`,
+        message_id: message.id ?? null,
+        team_id: channel.teamId,
+        team_name: channel.teamName,
+        channel_id: channel.channelId,
+        channel_name: channel.channelName,
+        author_name:
+          String(fromUser?.displayName ?? message.fromDisplayName ?? "Teams"),
+        text,
+        timestamp: String(message.createdDateTime ?? now),
+        reply_count: Number(message.replyCount ?? 0),
+        web_url: String(message.webUrl ?? ""),
+        synced_at: now,
+      });
+    }
+  }
+
+  return items
+    .sort(
+      (a, b) =>
+        new Date(String(b.timestamp ?? now)).getTime() -
+        new Date(String(a.timestamp ?? now)).getTime()
+    )
+    .slice(0, 24);
+}
+
 // ─── Slack via Cortex MCP ─────────────────────────────────────────────────
 
-async function fetchSlackMessages(token: string, sessionId: string) {
-  const KEY_CHANNELS = ["general", "slt", "leadership", "executive", "ai"];
-  const result = await cortexCall(
-    token,
-    sessionId,
-    "slack1",
-    "slack__list_channels",
-    { limit: 30 }
-  );
-  const channels: Record<string, unknown>[] = result.channels ?? [];
+async function fetchSlackMessages(
+  token: string,
+  sessionId: string,
+  channelSelections: FocusSelection[] = []
+) {
+  const explicitChannels = channelSelections
+    .filter((selection) => selection.importance !== "muted")
+    .slice(0, 6)
+    .map((selection) => ({
+      id: selection.entityId,
+      name: resolveSlackChannelName(selection),
+      importance: selection.importance,
+    }));
 
-  const prioritized = [
-    ...channels.filter((c) =>
-      KEY_CHANNELS.some((k) =>
-        ((c.name as string) || "").toLowerCase().includes(k)
-      )
-    ),
-    ...channels.filter(
-      (c) =>
-        !KEY_CHANNELS.some((k) =>
-          ((c.name as string) || "").toLowerCase().includes(k)
-        )
-    ),
-  ].slice(0, 5);
+  let prioritized = explicitChannels;
+
+  if (prioritized.length === 0) {
+    const result = await cortexCall(
+      token,
+      sessionId,
+      "slack1",
+      "slack__list_channels",
+      { limit: 40, types: "public_channel,private_channel" }
+    );
+    const channels: Record<string, unknown>[] = result.channels ?? [];
+
+    prioritized = channels
+      .filter((channel) => {
+        const type = String(channel.type ?? "");
+        const name = String(channel.name ?? "");
+        if (type === "group_dm" || type === "im") return false;
+        if (name.startsWith("mpdm-")) return false;
+        return true;
+      })
+      .slice(0, 6)
+      .map((channel) => ({
+        id: String(channel.id ?? ""),
+        name: String(channel.name ?? "channel"),
+        importance: "normal" as const,
+      }))
+      .filter((channel) => channel.id);
+  }
 
   const messages = await Promise.allSettled(
-    prioritized.map(async (ch) => {
+    prioritized.map(async (ch, index) => {
       const msgs = await cortexCall(
         token,
         sessionId,
-        `slack_${ch.id}`,
+        `slack_${index}`,
         "slack__get_channel_history",
-        { channel_id: ch.id as string, limit: 3 }
+        {
+          channel_id: ch.id as string,
+          limit: selectionLimit(ch.importance, {
+            critical: 5,
+            normal: 3,
+            quiet: 2,
+          }),
+        }
       );
       return {
         channel: ch.name,
@@ -1250,6 +1658,24 @@ export async function GET(request: NextRequest) {
   const errors: Record<string, string | null> = {};
   const skipped: string[] = [];
   const authenticatedUser = parseCortexUser(request);
+  const cortexUser = getCortexUserFromRequest(request);
+  let attentionSelections: LiveAttentionSelections = {
+    providerImportance: {},
+    mailFolders: [],
+    asanaProjects: [],
+    slackChannels: [],
+    teamsTeams: [],
+    teamsChannels: [],
+  };
+
+  if (cortexUser) {
+    try {
+      const profile = await loadAttentionProfile(cortexUser.sub);
+      attentionSelections = collectAttentionSelections(profile.focusPreferences);
+    } catch (error) {
+      errors.preferences = String(error);
+    }
+  }
 
   // Check which services the user has connected via Cortex
   const connections = await getConnections(cortexToken);
@@ -1279,6 +1705,7 @@ export async function GET(request: NextRequest) {
         tasks: [],
         asanaComments: [],
         chats: [],
+        teamsChannelMessages: [],
         slack: [],
         powerbi: { reports: [], kpis: [] },
         pipeline: [],
@@ -1296,37 +1723,76 @@ export async function GET(request: NextRequest) {
   const fetches: Record<string, Promise<unknown>> = {};
 
   if (hasM365) {
-    fetches.emails = fetchEmails(cortexToken, sessionId);
-    fetches.sentEmails = fetchSentEmails(cortexToken, sessionId);
-    fetches.calendar = fetchCalendar(cortexToken, sessionId);
-    fetches.chats = fetchTeamsChats(cortexToken, sessionId);
+    if (!shouldSkipProvider(attentionSelections, "outlook_mail")) {
+      fetches.emails = fetchEmails(
+        cortexToken,
+        sessionId,
+        attentionSelections.mailFolders
+      );
+      fetches.sentEmails = fetchSentEmails(cortexToken, sessionId);
+    } else {
+      skipped.push("outlook_mail");
+    }
+
+    if (!shouldSkipProvider(attentionSelections, "outlook_calendar")) {
+      fetches.calendar = fetchCalendar(
+        cortexToken,
+        sessionId,
+        getProviderImportance(attentionSelections, "outlook_calendar")
+      );
+    } else {
+      skipped.push("outlook_calendar");
+    }
+
+    if (!shouldSkipProvider(attentionSelections, "teams")) {
+      fetches.chats = fetchTeamsChats(cortexToken, sessionId);
+      fetches.teamsChannelMessages = fetchTeamsChannelMessages(
+        cortexToken,
+        sessionId,
+        attentionSelections.teamsTeams,
+        attentionSelections.teamsChannels
+      );
+    } else {
+      skipped.push("teams");
+    }
   } else {
     skipped.push("m365");
   }
 
   if (hasAsana) {
-    const url = new URL(request.url);
-    const projectGidsParam = url.searchParams.get("projectGids");
-    const filterGids = projectGidsParam
-      ? projectGidsParam.split(",").filter(Boolean)
-      : undefined;
-    const asanaPromise = fetchAsanaTasks(cortexToken, sessionId, filterGids);
-    fetches.tasks = asanaPromise.then((result) => result.tasks);
-    fetches.asanaProjects = asanaPromise.then((result) => result.asanaProjects);
-    fetches.asanaComments = asanaPromise.then((result) =>
-      fetchAsanaCommentThreads(
+    if (!shouldSkipProvider(attentionSelections, "asana")) {
+      const asanaPromise = fetchAsanaTasks(
         cortexToken,
         sessionId,
-        result.tasks as Task[],
-        authenticatedUser
-      )
-    );
+        attentionSelections.asanaProjects
+      );
+      fetches.tasks = asanaPromise.then((result) => result.tasks);
+      fetches.asanaProjects = asanaPromise.then((result) => result.asanaProjects);
+      fetches.asanaComments = asanaPromise.then((result) =>
+        fetchAsanaCommentThreads(
+          cortexToken,
+          sessionId,
+          result.tasks as Task[],
+          authenticatedUser
+        )
+      );
+    } else {
+      skipped.push("asana");
+    }
   } else {
     skipped.push("asana");
   }
 
   if (hasSlack) {
-    fetches.slack = fetchSlackMessages(cortexToken, sessionId);
+    if (!shouldSkipProvider(attentionSelections, "slack")) {
+      fetches.slack = fetchSlackMessages(
+        cortexToken,
+        sessionId,
+        attentionSelections.slackChannels
+      );
+    } else {
+      skipped.push("slack");
+    }
   } else {
     skipped.push("slack");
   }
@@ -1369,6 +1835,7 @@ export async function GET(request: NextRequest) {
     asanaComments: resolved.asanaComments ?? [],
     asanaProjects: resolved.asanaProjects ?? [],
     chats: resolved.chats ?? [],
+    teamsChannelMessages: resolved.teamsChannelMessages ?? [],
     slack: resolved.slack ?? [],
     powerbi: {
       ...pbi,

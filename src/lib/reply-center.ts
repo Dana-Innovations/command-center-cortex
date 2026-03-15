@@ -1,3 +1,10 @@
+import {
+  buildAsanaCommentAttentionTarget,
+  buildEmailAttentionTarget,
+  buildSlackAttentionTarget,
+  buildTeamsChatAttentionTarget,
+} from "@/lib/attention/targets";
+import type { AttentionTarget } from "@/lib/attention/types";
 import type {
   AsanaCommentThread,
   Chat,
@@ -23,6 +30,7 @@ export interface ReplyPrioritySignals {
 export interface ReplyQueueItem {
   id: string;
   source: ReplySource;
+  attentionTarget: AttentionTarget;
   title: string;
   sender: string;
   senderEmail?: string | null;
@@ -771,6 +779,11 @@ export function buildReplyQueue({
     items.push({
       id: `email:${email.message_id || email.id}`,
       source: "email",
+      attentionTarget: buildEmailAttentionTarget(
+        email,
+        "reply-center",
+        scoreResult.score
+      ),
       title: email.subject || "(no subject)",
       sender: email.from_name || email.from_email || "Unknown sender",
       senderEmail: email.from_email || null,
@@ -823,6 +836,11 @@ export function buildReplyQueue({
     items.push({
       id: `teams:${chat.id}`,
       source: "teams",
+      attentionTarget: buildTeamsChatAttentionTarget(
+        chat,
+        "reply-center",
+        scoreResult.score
+      ),
       title,
       sender,
       summary: preview || "Open in Teams to continue the conversation.",
@@ -865,6 +883,11 @@ export function buildReplyQueue({
     items.push({
       id: `slack:${message.id}`,
       source: "slack_context",
+      attentionTarget: buildSlackAttentionTarget(
+        message,
+        "reply-center",
+        scoreResult.score
+      ),
       title:
         preview && message.author_name
           ? `${message.author_name}: ${truncate(message.text, 72)}`
@@ -897,6 +920,11 @@ export function buildReplyQueue({
     items.push({
       id: `asana:${thread.id}`,
       source: "asana_comment",
+      attentionTarget: buildAsanaCommentAttentionTarget(
+        thread,
+        "reply-center",
+        scoreResult.score
+      ),
       title: thread.task_name,
       sender: thread.latest_commenter_name || "Asana",
       senderEmail: thread.latest_commenter_email || null,

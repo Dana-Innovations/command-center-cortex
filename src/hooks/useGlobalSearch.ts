@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from "react";
+import { useAttention } from "@/lib/attention/client";
+import {
+  buildCalendarAttentionTarget,
+  buildEmailAttentionTarget,
+  buildTaskAttentionTarget,
+} from "@/lib/attention/targets";
 import { useLiveData } from "@/lib/live-data-context";
 import { usePeople, type Person } from "@/hooks/usePeople";
+import type { AttentionTarget } from "@/lib/attention/types";
 import type {
   Email,
   CalendarEvent,
@@ -21,6 +28,9 @@ export interface SearchResult {
   url?: string;
   /** tab to navigate to when selected */
   tab: string;
+  attentionTarget?: AttentionTarget;
+  finalScore?: number;
+  focusExplanation?: string[];
   raw: Task | Person | Email | CalendarEvent | SalesforceOpportunity;
 }
 
@@ -58,6 +68,7 @@ function formatDate(iso: string | null | undefined): string {
 export function useGlobalSearch() {
   const { emails, calendar, tasks, opportunities, loading: dataLoading } = useLiveData();
   const { people } = usePeople();
+  const { applyTarget } = useAttention();
 
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -111,6 +122,7 @@ export function useGlobalSearch() {
           subtitle: [t.project_name, t.due_on ? `Due ${formatDate(t.due_on)}` : null].filter(Boolean).join(" · "),
           url: t.permalink_url,
           tab: "priority",
+          attentionTarget: buildTaskAttentionTarget(t, "search", s === 3 ? 78 : s === 2 ? 64 : 50),
           raw: t,
           _score: s,
         });
@@ -144,6 +156,7 @@ export function useGlobalSearch() {
           subtitle: [e.from_name, formatDate(e.received_at)].filter(Boolean).join(" · "),
           url: e.outlook_url,
           tab: "priority",
+          attentionTarget: buildEmailAttentionTarget(e, "search", s === 3 ? 76 : s === 2 ? 62 : 48),
           raw: e,
           _score: s,
         });
@@ -161,6 +174,7 @@ export function useGlobalSearch() {
           subtitle: [ev.organizer, formatDate(ev.start_time)].filter(Boolean).join(" · "),
           url: ev.outlook_url || ev.join_url,
           tab: "calendar",
+          attentionTarget: buildCalendarAttentionTarget(ev, "search", s === 3 ? 74 : s === 2 ? 60 : 46),
           raw: ev,
           _score: s,
         });
@@ -184,11 +198,32 @@ export function useGlobalSearch() {
       }
     }
 
-    // Sort by score desc, then alphabetical
-    hits.sort((a, b) => b._score - a._score || a.title.localeCompare(b.title));
+    return hits
+      .map((hit) => {
+        if (!hit.attentionTarget) {
+          return {
+            ...hit,
+            finalScore: hit._score,
+            focusExplanation: [],
+          };
+        }
 
-    return hits;
-  }, [debouncedQuery, tasks, people, emails, calendar, opportunities]);
+        const attention = applyTarget(hit.attentionTarget);
+        return {
+          ...hit,
+          finalScore: attention.finalScore,
+          focusExplanation: attention.explanation,
+          hidden: attention.hidden,
+        };
+      })
+      .filter((hit) => !("hidden" in hit) || !hit.hidden)
+      .sort(
+        (a, b) =>
+          (b.finalScore ?? b._score) - (a.finalScore ?? a._score) ||
+          b._score - a._score ||
+          a.title.localeCompare(b.title)
+      );
+  }, [applyTarget, calendar, debouncedQuery, emails, opportunities, people, tasks]);
 
   // Group by category
   const grouped = useMemo(() => {

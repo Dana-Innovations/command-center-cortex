@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ExternalLinkIcon } from "@/components/ui/icons";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AttentionFeedbackControl } from "@/components/ui/AttentionFeedbackControl";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useEmails } from "@/hooks/useEmails";
 import { useChats } from "@/hooks/useChats";
 import { useSlackFeed } from "@/hooks/useSlackFeed";
 import { useAsanaComments } from "@/hooks/useAsanaComments";
+import { useAttention } from "@/lib/attention/client";
 import type { EmailDetail } from "@/lib/email-reply";
 import {
   buildOutlookComposeUrl,
@@ -320,6 +322,7 @@ export function ReplyCenter() {
   const { messages: slackMessages, loading: slackLoading } = useSlackFeed();
   const { comments: asanaComments, loading: asanaLoading } = useAsanaComments();
   const { user } = useAuth();
+  const { applyTarget, replyPreferences, updateReplyPreferences } = useAttention();
   const { addToast } = useToast();
 
   const loading = emailsLoading || chatsLoading || slackLoading || asanaLoading;
@@ -337,6 +340,7 @@ export function ReplyCenter() {
   const [preferences, setPreferences] = useState<ReplyPriorityPreferences>(
     createDefaultReplyPriorityPreferences
   );
+  const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -362,7 +366,7 @@ export function ReplyCenter() {
     if (!storageKey) {
       setDismissedIds(new Set());
       setSnoozedUntil({});
-      setPreferences(createDefaultReplyPriorityPreferences());
+      setPreferences(replyPreferences);
       setStorageReady(true);
       return;
     }
@@ -370,9 +374,14 @@ export function ReplyCenter() {
     const stored = parseStoredState(window.localStorage.getItem(storageKey));
     setDismissedIds(new Set(stored.dismissedIds));
     setSnoozedUntil(pruneSnoozes(stored.snoozedUntil));
-    setPreferences(stored.preferences);
+    setPreferences(replyPreferences);
     setStorageReady(true);
-  }, [storageKey]);
+  }, [replyPreferences, storageKey]);
+
+  useEffect(() => {
+    setPreferences(replyPreferences);
+    setPreferencesDirty(false);
+  }, [replyPreferences]);
 
   useEffect(() => {
     if (!storageKey || !storageReady) return;
@@ -385,6 +394,17 @@ export function ReplyCenter() {
 
     window.localStorage.setItem(storageKey, JSON.stringify(payload));
   }, [dismissedIds, preferences, snoozedUntil, storageKey, storageReady]);
+
+  useEffect(() => {
+    if (!preferencesDirty) return;
+
+    const timeout = window.setTimeout(() => {
+      void updateReplyPreferences(preferences);
+      setPreferencesDirty(false);
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [preferences, preferencesDirty, updateReplyPreferences]);
 
   const queueItems = useMemo(
     () =>
@@ -399,21 +419,47 @@ export function ReplyCenter() {
     [asanaComments, chats, currentUserName, emails, preferences, slackMessages]
   );
 
+  const attentionQueueItems = useMemo(
+    () =>
+      queueItems
+        .map((item) => {
+          const attention = applyTarget({
+            ...item.attentionTarget,
+            baseScore: item.displayScore,
+          });
+
+          return {
+            ...item,
+            displayScore: attention.finalScore,
+            score: attention.finalScore,
+            attention,
+          };
+        })
+        .filter((item) => !item.attention.hidden)
+        .sort((a, b) => {
+          if (b.displayScore !== a.displayScore) {
+            return b.displayScore - a.displayScore;
+          }
+          return b.sortTime - a.sortTime;
+        }),
+    [applyTarget, queueItems]
+  );
+
   const isCustomized = hasCustomizedReplyPriorityPreferences(preferences);
 
   const visibleItems = useMemo(() => {
     const now = Date.now();
-    return queueItems.filter((item) => {
+    return attentionQueueItems.filter((item) => {
       if (dismissedIds.has(item.id)) return false;
       if (snoozedUntil[item.id] && snoozedUntil[item.id] > now) return false;
       if (activeFilter !== "all" && item.source !== activeFilter) return false;
       return true;
     });
-  }, [activeFilter, dismissedIds, queueItems, snoozedUntil]);
+  }, [activeFilter, attentionQueueItems, dismissedIds, snoozedUntil]);
 
   const counts = useMemo(() => {
     const now = Date.now();
-    const activeItems = queueItems.filter((item) => {
+    const activeItems = attentionQueueItems.filter((item) => {
       if (dismissedIds.has(item.id)) return false;
       if (snoozedUntil[item.id] && snoozedUntil[item.id] > now) return false;
       return true;
@@ -428,7 +474,7 @@ export function ReplyCenter() {
       asana_comment: activeItems.filter((item) => item.source === "asana_comment")
         .length,
     };
-  }, [dismissedIds, queueItems, snoozedUntil]);
+  }, [attentionQueueItems, dismissedIds, snoozedUntil]);
 
   async function ensureEmailDetail(item: ReplyQueueItem) {
     if (item.source !== "email" || !item.messageId) return null;
@@ -528,6 +574,7 @@ export function ReplyCenter() {
 
   function resetPreferences() {
     setPreferences(createDefaultReplyPriorityPreferences());
+    setPreferencesDirty(true);
     addToast("Priority settings reset to defaults.", "default");
   }
 
@@ -539,6 +586,7 @@ export function ReplyCenter() {
         [source]: next,
       },
     }));
+    setPreferencesDirty(true);
   }
 
   function updateFactorWeight(factor: ReplyPriorityFactorKey, next: number) {
@@ -549,6 +597,7 @@ export function ReplyCenter() {
         [factor]: next,
       },
     }));
+    setPreferencesDirty(true);
   }
 
   async function copyText(text: string, message = "Copied to clipboard.") {
@@ -1025,7 +1074,7 @@ export function ReplyCenter() {
                   Priority Tuning
                 </div>
                 <p className="mt-2 max-w-3xl text-sm leading-relaxed text-text-muted">
-                  Adjust how strongly each source and factor influences the queue. Changes apply instantly and stay in this browser for your account.
+                  Adjust how strongly each source and factor influences the queue. Changes save to your workspace profile and travel with you across sessions.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1033,7 +1082,7 @@ export function ReplyCenter() {
                   Live reordering
                 </div>
                 <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-text-muted">
-                  Browser local
+                  Server-backed
                 </div>
               </div>
             </div>
@@ -1162,6 +1211,14 @@ export function ReplyCenter() {
                             {buildScoreBreakdownLine(item)}
                           </p>
                         )}
+                        {"attention" in item && item.attention.explanation.length > 0 && (
+                          <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+                            <span className="mr-1 uppercase tracking-[0.18em] text-[10px] text-accent-green">
+                              Focus
+                            </span>
+                            {item.attention.explanation.join(" · ")}
+                          </p>
+                        )}
 
                         <div className="mt-3 flex flex-wrap gap-1.5">
                           {priorityPills.map((pill) => (
@@ -1187,7 +1244,12 @@ export function ReplyCenter() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 lg:w-[280px] lg:justify-end">
+                    <div className="flex flex-wrap gap-2 lg:w-[320px] lg:justify-end">
+                      <AttentionFeedbackControl
+                        target={item.attentionTarget}
+                        surface="reply-center"
+                        compact
+                      />
                       {item.source !== "slack_context" && (
                         <button
                           className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"

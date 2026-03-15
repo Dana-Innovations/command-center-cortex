@@ -15,13 +15,17 @@ import { MeetingPrepView } from "@/components/views/MeetingPrepView";
 import { DigestView } from "@/components/views/DigestView";
 import { EODSummary } from "@/components/modals/EODSummary";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
+import { WorkspaceStudio } from "@/components/ui/WorkspaceStudio";
+import { AttentionProvider, useAttention } from "@/lib/attention/client";
 import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
 import { getVisibleTabs } from "@/lib/tab-config";
 
 export default function Home() {
   return (
     <LiveDataProvider>
-      <HomeContent />
+      <AttentionProvider>
+        <HomeContent />
+      </AttentionProvider>
     </LiveDataProvider>
   );
 }
@@ -32,18 +36,16 @@ function HomeContent() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [prepEventId, setPrepEventId] = useState<string | undefined>();
   const { loading, fetchedAt, error, refetch, connections } = useLiveData();
+  const { focusRevision } = useAttention();
 
   const visibleTabs = useMemo(
     () => getVisibleTabs(connections, !!fetchedAt),
     [connections, fetchedAt]
   );
-
-  // Redirect to Digest if current tab becomes hidden
-  useEffect(() => {
-    if (fetchedAt && !visibleTabs.includes(activeTab)) {
-      setActiveTab("digest");
-    }
-  }, [visibleTabs, activeTab, fetchedAt]);
+  const effectiveActiveTab = useMemo(
+    () => (fetchedAt && !visibleTabs.includes(activeTab) ? "digest" : activeTab),
+    [activeTab, fetchedAt, visibleTabs]
+  );
 
   const handlePrepNavigate = useCallback((eventId: string) => {
     setPrepEventId(eventId);
@@ -59,6 +61,11 @@ function HomeContent() {
     return () => window.removeEventListener("navigate-prep", handler);
   }, [handlePrepNavigate]);
 
+  useEffect(() => {
+    if (focusRevision === 0) return;
+    void refetch();
+  }, [focusRevision, refetch]);
+
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
       <div className="grain-overlay" aria-hidden="true" />
@@ -72,27 +79,28 @@ function HomeContent() {
       />
 
       <TabBar
-        activeTab={activeTab}
+        activeTab={effectiveActiveTab}
         onTabChange={setActiveTab}
         visibleTabIds={visibleTabs}
         className="mb-5"
       />
 
       <main className="px-4 md:px-6 pb-24 md:pb-8">
-        {activeTab === "digest"    && <DigestView />}
-        {activeTab === "priority"  && <PriorityView />}
-        {activeTab === "sales"     && <SalesTabView />}
-        {activeTab === "metrics"   && <MetricsView />}
-        {activeTab === "people"    && <UnifiedPeopleView />}
-        {activeTab === "calendar"  && <CalendarView />}
-        {activeTab === "prep"      && <MeetingPrepView initialEventId={prepEventId} />}
-        {activeTab === "signals"   && <SignalsView />}
-        {activeTab === "minden"    && <MindensView />}
-        {activeTab === "delegation" && <DelegationView />}
+        {effectiveActiveTab === "digest"    && <DigestView />}
+        {effectiveActiveTab === "priority"  && <PriorityView />}
+        {effectiveActiveTab === "sales"     && <SalesTabView />}
+        {effectiveActiveTab === "metrics"   && <MetricsView />}
+        {effectiveActiveTab === "people"    && <UnifiedPeopleView />}
+        {effectiveActiveTab === "calendar"  && <CalendarView />}
+        {effectiveActiveTab === "prep"      && <MeetingPrepView initialEventId={prepEventId} />}
+        {effectiveActiveTab === "signals"   && <SignalsView />}
+        {effectiveActiveTab === "minden"    && <MindensView />}
+        {effectiveActiveTab === "delegation" && <DelegationView />}
       </main>
 
       <Footer onEodSummary={() => setEodOpen(true)} />
       <EODSummary isOpen={eodOpen} onClose={() => setEodOpen(false)} />
+      <WorkspaceStudio />
       <GlobalSearch
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}

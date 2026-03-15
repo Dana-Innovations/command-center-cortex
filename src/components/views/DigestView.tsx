@@ -9,9 +9,13 @@ import { useEmails } from "@/hooks/useEmails";
 import { useSalesforce } from "@/hooks/useSalesforce";
 import { useMonday } from "@/hooks/useMonday";
 import { useAsanaComments } from "@/hooks/useAsanaComments";
-import { useLiveData } from "@/lib/live-data-context";
+import { useAttention } from "@/lib/attention/client";
+import { AttentionFeedbackControl } from "@/components/ui/AttentionFeedbackControl";
+import {
+  buildCalendarAttentionTarget,
+  buildTaskAttentionTarget,
+} from "@/lib/attention/targets";
 import { useConnections } from "@/hooks/useConnections";
-import { ConnectedServicesPanel } from "@/components/ui/ConnectedServicesPanel";
 import { toCalendarEventDate, toPacificDate } from "@/lib/calendar";
 import type { Task, CalendarEvent } from "@/lib/types";
 
@@ -242,59 +246,21 @@ export function DigestView() {
   const { opportunities, loading: sfLoading } = useSalesforce();
   const { orders, loading: mondayLoading } = useMonday();
   const { comments: asanaComments, loading: commentsLoading } = useAsanaComments();
-  const { asanaProjects, refetch } = useLiveData();
   const connections = useConnections();
+  const { profile, openStudio, applyTarget } = useAttention();
 
-  // ─── Board filter state ───────────────────────────────────────────────────
-  const [showBoardSettings, setShowBoardSettings] = useState(false);
-  const [selectedProjectGids, setSelectedProjectGids] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem("my-monkeys:project-filter");
-      return stored ? (JSON.parse(stored) as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
-  const boardSettingsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showBoardSettings) return;
-    const handleClick = (e: MouseEvent) => {
-      if (boardSettingsRef.current && !boardSettingsRef.current.contains(e.target as Node)) {
-        setShowBoardSettings(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showBoardSettings]);
-
-  const handleToggleProject = useCallback(
-    (gid: string) => {
-      setSelectedProjectGids((prev) => {
-        const next = prev.includes(gid)
-          ? prev.filter((g) => g !== gid)
-          : [...prev, gid];
-        try {
-          localStorage.setItem("my-monkeys:project-filter", JSON.stringify(next));
-        } catch {
-          // ignore
-        }
-        return next;
-      });
-      void refetch();
-    },
-    [refetch]
+  const selectedProjectGids = useMemo(
+    () =>
+      (profile?.focusPreferences ?? [])
+        .filter(
+          (record) =>
+            record.provider === "asana" &&
+            record.entity_type === "asana_project" &&
+            record.importance !== "muted"
+        )
+        .map((record) => record.entity_id),
+    [profile]
   );
-
-  const handleSelectAllBoards = useCallback(() => {
-    setSelectedProjectGids([]);
-    try {
-      localStorage.setItem("my-monkeys:project-filter", JSON.stringify([]));
-    } catch {
-      // ignore
-    }
-    void refetch();
-  }, [refetch]);
 
   const userName = user?.user_metadata?.full_name ?? "";
   const firstName = userName.split(" ")[0] || "there";
@@ -670,12 +636,6 @@ export function DigestView() {
 
   // ─── Needs Attention grouped by source ────────────────────────────────────
 
-  const SOURCE_LABELS: Record<string, string> = {
-    email: "Email",
-    asana: "Asana",
-    salesforce: "Salesforce",
-  };
-
   const attentionGroups = useMemo(() => {
     const groups: Record<string, typeof needsAttention> = {};
     for (const item of needsAttention) {
@@ -837,8 +797,6 @@ export function DigestView() {
   // Gorilla expand state
   const [expandedGorilla, setExpandedGorilla] = useState<string | null>(null);
 
-  // Unlock more services
-  const [servicesOpen, setServicesOpen] = useState(false);
   const disconnectedServices = useMemo(
     () => Object.entries(connections)
       .filter(([, connected]) => !connected)
@@ -959,6 +917,14 @@ export function DigestView() {
                   const isCurrent = isCurrentMeeting(event);
                   const isPast = new Date(event.end_time).getTime() < new Date().getTime();
                   const isUpNext = event.id === nextMeetingId;
+                  const attention = applyTarget(
+                    buildCalendarAttentionTarget(
+                      event,
+                      "digest",
+                      isCurrent ? 72 : isUpNext ? 66 : 54
+                    )
+                  );
+                  if (attention.hidden) return null;
                   return (
                     <div
                       key={event.id}
@@ -999,6 +965,11 @@ export function DigestView() {
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        <AttentionFeedbackControl
+                          target={attention}
+                          surface="digest"
+                          compact
+                        />
                         <button
                           onClick={() =>
                             window.dispatchEvent(
@@ -1038,48 +1009,59 @@ export function DigestView() {
                       {group.label}
                     </p>
                     <div className="space-y-2">
-                      {group.events.map((event) => (
-                        <div
-                          key={event.id}
-                          className="flex items-start gap-3 p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]"
-                        >
-                          <div className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-[70px] pt-0.5">
-                            {formatTimeShort(event.start_time)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-text-heading truncate">
-                              {event.subject}
-                            </p>
-                            <p className="text-xs text-text-muted truncate mt-0.5">
-                              {formatTimeShort(event.start_time)} –{" "}
-                              {formatTimeShort(event.end_time)}
-                              {event.organizer && ` · ${event.organizer}`}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              onClick={() =>
-                                window.dispatchEvent(
-                                  new CustomEvent("navigate-prep", { detail: { eventId: event.id } })
-                                )
-                              }
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 text-text-muted text-[11px] font-medium hover:text-text-body hover:bg-white/10 transition-colors"
-                            >
-                              {PrepIcon} Prep
-                            </button>
-                            {event.is_online && event.join_url && (
-                              <a
-                                href={event.join_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors bg-white/5 text-text-muted hover:text-text-body hover:bg-white/10"
+                      {group.events.map((event) => {
+                        const attention = applyTarget(
+                          buildCalendarAttentionTarget(event, "digest", 52)
+                        );
+                        if (attention.hidden) return null;
+                        return (
+                          <div
+                            key={event.id}
+                            className="flex items-start gap-3 p-3 rounded-lg transition-colors bg-white/[0.03] hover:bg-white/[0.06]"
+                          >
+                            <div className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-[70px] pt-0.5">
+                              {formatTimeShort(event.start_time)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-text-heading truncate">
+                                {event.subject}
+                              </p>
+                              <p className="text-xs text-text-muted truncate mt-0.5">
+                                {formatTimeShort(event.start_time)} –{" "}
+                                {formatTimeShort(event.end_time)}
+                                {event.organizer && ` · ${event.organizer}`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <AttentionFeedbackControl
+                                target={attention}
+                                surface="digest"
+                                compact
+                              />
+                              <button
+                                onClick={() =>
+                                  window.dispatchEvent(
+                                    new CustomEvent("navigate-prep", { detail: { eventId: event.id } })
+                                  )
+                                }
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 text-text-muted text-[11px] font-medium hover:text-text-body hover:bg-white/10 transition-colors"
                               >
-                                {VideoIcon} Join
-                              </a>
-                            )}
+                                {PrepIcon} Prep
+                              </button>
+                              {event.is_online && event.join_url && (
+                                <a
+                                  href={event.join_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors bg-white/5 text-text-muted hover:text-text-body hover:bg-white/10"
+                                >
+                                  {VideoIcon} Join
+                                </a>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -1170,76 +1152,35 @@ export function DigestView() {
             className="glass-card anim-card p-5"
             style={{ animationDelay: "160ms" }}
           >
-            <div ref={boardSettingsRef}>
-              <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
-                </svg>
-                My Monkeys
-                <span className="text-xs text-text-muted font-normal">
-                  ({filteredMonkeys.length})
-                </span>
-                <div className="ml-auto flex items-center gap-2">
-                  {monkeyFallbackTier === 2 && !showBoardSettings && selectedProjectGids.length === 0 && (
-                    <span className="text-xs text-text-muted font-normal">All tasks</span>
-                  )}
-                  {monkeyFallbackTier === 3 && !showBoardSettings && selectedProjectGids.length === 0 && (
-                    <span className="text-xs text-text-muted font-normal">From my projects</span>
-                  )}
-                  {selectedProjectGids.length > 0 && !showBoardSettings && (
-                    <span className="text-xs text-text-muted font-normal">{selectedProjectGids.length} board{selectedProjectGids.length !== 1 ? "s" : ""}</span>
-                  )}
-                  <button
-                    onClick={() => setShowBoardSettings((v) => !v)}
-                    className={cn(
-                      "p-1 rounded transition-colors",
-                      showBoardSettings
-                        ? "text-text-heading bg-white/10"
-                        : "text-text-muted hover:text-text-heading hover:bg-white/[0.06]"
-                    )}
-                    title="Filter boards"
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-                    </svg>
-                  </button>
-                </div>
-              </h2>
-
-              {showBoardSettings && (
-                <div className="mb-3 p-3 rounded-lg bg-white/[0.04] border border-white/[0.08]">
-                  <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Filter by board</p>
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={selectedProjectGids.length === 0}
-                        onChange={handleSelectAllBoards}
-                        className="accent-accent-teal w-3.5 h-3.5"
-                      />
-                      <span className="text-xs text-text-heading font-medium group-hover:text-white transition-colors">All boards</span>
-                    </label>
-                    {asanaProjects.length > 0 && (
-                      <div className="border-t border-white/[0.06] my-1.5" />
-                    )}
-                    {asanaProjects.map((project) => (
-                      <label key={project.gid} className="flex items-center gap-2 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={selectedProjectGids.includes(project.gid)}
-                          onChange={() => handleToggleProject(project.gid)}
-                          className="accent-accent-teal w-3.5 h-3.5"
-                        />
-                        <span className="text-xs text-text-muted group-hover:text-text-heading transition-colors truncate">{project.name}</span>
-                      </label>
-                    ))}
-                    {asanaProjects.length === 0 && (
-                      <p className="text-xs text-text-muted opacity-60 py-1">Loading boards…</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            <h2 className="text-sm font-semibold text-text-heading mb-3 flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
+              </svg>
+              My Monkeys
+              <span className="text-xs text-text-muted font-normal">
+                ({filteredMonkeys.length})
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                {monkeyFallbackTier === 2 && selectedProjectGids.length === 0 && (
+                  <span className="text-xs text-text-muted font-normal">All tasks</span>
+                )}
+                {monkeyFallbackTier === 3 && selectedProjectGids.length === 0 && (
+                  <span className="text-xs text-text-muted font-normal">From my projects</span>
+                )}
+                {selectedProjectGids.length > 0 && (
+                  <span className="text-xs text-text-muted font-normal">
+                    {selectedProjectGids.length} focused board{selectedProjectGids.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+                <button
+                  onClick={() => openStudio("focus")}
+                  className="rounded-lg bg-white/5 px-2.5 py-1 text-[11px] font-medium text-text-muted transition-colors hover:bg-white/10 hover:text-text-body"
+                  title="Open focus map"
+                >
+                  Focus map
+                </button>
+              </div>
+            </h2>
 
             {loading ? (
               <SectionSkeleton />
@@ -1251,6 +1192,14 @@ export function DigestView() {
                   const isOverdue = task.days_overdue > 0;
                   const isDueToday = !isOverdue && task.due_on === todayStr;
                   const hasDate = !!task.due_on;
+                  const attention = applyTarget(
+                    buildTaskAttentionTarget(
+                      task,
+                      "digest",
+                      isOverdue ? 72 : isDueToday ? 64 : 52
+                    )
+                  );
+                  if (attention.hidden) return null;
                   const urgency: "red" | "amber" | "teal" = isOverdue
                     ? "red"
                     : isDueToday
@@ -1278,20 +1227,27 @@ export function DigestView() {
                         <p className="text-sm font-medium text-text-heading truncate flex-1">
                           {task.name}
                         </p>
-                        <span
-                          className={cn(
-                            "shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                            isOverdue
-                              ? "bg-accent-red/15 text-accent-red"
-                              : isDueToday
-                              ? "bg-accent-amber/15 text-accent-amber"
-                              : !hasDate
-                              ? "bg-white/10 text-text-muted"
-                              : "bg-accent-teal/15 text-accent-teal"
-                          )}
-                        >
-                          {badgeLabel}
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <AttentionFeedbackControl
+                            target={attention}
+                            surface="digest"
+                            compact
+                          />
+                          <span
+                            className={cn(
+                              "shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                              isOverdue
+                                ? "bg-accent-red/15 text-accent-red"
+                                : isDueToday
+                                ? "bg-accent-amber/15 text-accent-amber"
+                                : !hasDate
+                                  ? "bg-white/10 text-text-muted"
+                                  : "bg-accent-teal/15 text-accent-teal"
+                            )}
+                          >
+                            {badgeLabel}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-xs text-text-muted mt-1 truncate">
                         {task.project_name}
@@ -1639,7 +1595,7 @@ export function DigestView() {
               </div>
             </div>
             <button
-              onClick={() => setServicesOpen(true)}
+              onClick={() => openStudio("connections")}
               className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-text-primary transition-colors cursor-pointer"
             >
               Manage
@@ -1647,8 +1603,6 @@ export function DigestView() {
           </div>
         </div>
       )}
-
-      <ConnectedServicesPanel open={servicesOpen} onClose={() => setServicesOpen(false)} />
     </div>
   );
 }
