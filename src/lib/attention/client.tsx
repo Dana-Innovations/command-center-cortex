@@ -21,13 +21,12 @@ import type {
   ImportanceTier,
 } from "@/lib/attention/types";
 import { applyAttentionProfile } from "@/lib/attention/utils";
+import type { SetupFocusTab } from "@/lib/tab-config";
 import {
   createDefaultReplyPriorityPreferences,
   mergeReplyPriorityPreferences,
   type ReplyPriorityPreferences,
 } from "@/lib/reply-center";
-
-type StudioTab = "connections" | "focus" | "learning";
 
 interface ServiceStatus {
   provider: string;
@@ -49,13 +48,12 @@ interface AttentionContextValue {
   profileLoading: boolean;
   focusMapLoading: boolean;
   servicesLoading: boolean;
-  studioOpen: boolean;
-  studioTab: StudioTab;
+  onboardingCompleted: boolean;
+  setupTab: SetupFocusTab;
   focusRevision: number;
   replyPreferences: ReplyPriorityPreferences;
-  openStudio: (tab?: StudioTab) => void;
-  closeStudio: () => void;
-  setStudioTab: (tab: StudioTab) => void;
+  openSetupFocus: (tab?: SetupFocusTab) => void;
+  setSetupTab: (tab: SetupFocusTab) => void;
   refreshProfile: () => Promise<void>;
   refreshFocusMap: (options?: { provider?: string; teamId?: string }) => Promise<void>;
   refreshServices: () => Promise<void>;
@@ -122,10 +120,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(true);
   const [focusMapLoading, setFocusMapLoading] = useState(true);
   const [servicesLoading, setServicesLoading] = useState(true);
-  const [studioOpen, setStudioOpen] = useState(false);
-  const [studioTab, setStudioTab] = useState<StudioTab>("focus");
+  const [setupTab, setSetupTab] = useState<SetupFocusTab>("focus");
   const [focusRevision, setFocusRevision] = useState(0);
-  const onboardingOpenedRef = useRef(false);
   const migratedLegacyRef = useRef(false);
 
   const refreshProfile = useCallback(async () => {
@@ -193,18 +189,10 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
     [profile]
   );
 
-  useEffect(() => {
-    const onboardingCompleted = Boolean(
-      profile?.settings?.onboarding?.workspace_studio_completed_at
-    );
-    if (!profile || onboardingCompleted || onboardingOpenedRef.current) {
-      return;
-    }
-
-    onboardingOpenedRef.current = true;
-    setStudioTab("focus");
-    setStudioOpen(true);
-  }, [profile]);
+  const onboardingCompleted = useMemo(
+    () => Boolean(profile?.settings?.onboarding?.workspace_studio_completed_at),
+    [profile]
+  );
 
   const savePreferences = useCallback(
     async (body: {
@@ -299,13 +287,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
     });
   }, [profile, refreshFocusMap, savePreferences, user]);
 
-  const openStudio = useCallback((tab: StudioTab = "focus") => {
-    setStudioTab(tab);
-    setStudioOpen(true);
-  }, []);
-
-  const closeStudio = useCallback(() => {
-    setStudioOpen(false);
+  const openSetupFocus = useCallback((tab: SetupFocusTab = "focus") => {
+    setSetupTab(tab);
   }, []);
 
   const ensureTeamChannels = useCallback(
@@ -367,7 +350,6 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
         },
       },
     });
-    setStudioOpen(false);
   }, [savePreferences]);
 
   const updateReplyPreferences = useCallback(
@@ -435,13 +417,12 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
       profileLoading,
       focusMapLoading,
       servicesLoading,
-      studioOpen,
-      studioTab,
+      onboardingCompleted,
+      setupTab,
       focusRevision,
       replyPreferences,
-      openStudio,
-      closeStudio,
-      setStudioTab,
+      openSetupFocus,
+      setSetupTab,
       refreshProfile,
       refreshFocusMap,
       refreshServices,
@@ -455,14 +436,14 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
     }),
     [
       applyTarget,
-      closeStudio,
       completeOnboarding,
       ensureTeamChannels,
       focusMapLoading,
       focusProviders,
       focusRevision,
       getItemFeedback,
-      openStudio,
+      onboardingCompleted,
+      openSetupFocus,
       profile,
       profileLoading,
       refreshFocusMap,
@@ -472,8 +453,7 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
       services,
       servicesLoading,
       setNodeImportance,
-      studioOpen,
-      studioTab,
+      setupTab,
       submitFeedback,
       updateReplyPreferences,
     ]

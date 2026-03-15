@@ -1,11 +1,10 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import { getGreeting, getFormattedDate } from "@/utils/date";
+
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SyncIndicator } from "@/components/ui/SyncIndicator";
 import { CommandBar, type CommandItem } from "@/components/ui/CommandBar";
 import { useAuth } from "@/hooks/useAuth";
-import { useAttention } from "@/lib/attention/client";
 import { useLiveData } from "@/lib/live-data-context";
 
 interface HeaderProps {
@@ -15,6 +14,7 @@ interface HeaderProps {
   syncError?: string | null;
   commandItems?: CommandItem[];
   onSearchOpen?: () => void;
+  onOpenSetup?: () => void;
 }
 
 export function Header({
@@ -24,100 +24,82 @@ export function Header({
   syncError = null,
   commandItems = [],
   onSearchOpen,
+  onOpenSetup,
 }: HeaderProps) {
   const { user, signOut } = useAuth();
   const { loading, error } = useLiveData();
-  const { openStudio } = useAttention();
-  const [greeting, setGreeting] = useState("");
-  const [dateStr, setDateStr] = useState("");
-  const [clock, setClock] = useState("");
   const [commandBarOpen, setCommandBarOpen] = useState(false);
 
   const userInitial = user?.user_metadata?.full_name?.[0] ?? user?.email?.[0] ?? "?";
   const userName = user?.user_metadata?.full_name ?? user?.email ?? "";
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] ?? "";
 
-  // Initialize and update clock every second
   useEffect(() => {
-    function update() {
-      setGreeting(getGreeting(firstName));
-      setDateStr(getFormattedDate());
-      setClock(
-        new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-          timeZone: "America/Los_Angeles",
-        })
-      );
-    }
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [firstName]);
-
-  // Global "/" key listener for command bar
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      // Cmd+K / Ctrl+K opens global search
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "k" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
         onSearchOpen?.();
         return;
       }
+
       if (
-        e.key === "/" &&
+        event.key === "/" &&
         !commandBarOpen &&
-        !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement)
+        !(event.target instanceof HTMLInputElement) &&
+        !(event.target instanceof HTMLTextAreaElement)
       ) {
-        e.preventDefault();
+        event.preventDefault();
         setCommandBarOpen(true);
       }
     }
+
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [commandBarOpen, onSearchOpen]);
 
-  // Theme toggle
   const toggleTheme = useCallback(() => {
     document.documentElement.classList.toggle("dark");
   }, []);
 
-  // Print
   const handlePrint = useCallback(() => {
     window.print();
   }, []);
 
   return (
     <>
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-6 py-5">
-        {/* Left: greeting + date + clock */}
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-text-heading leading-tight" suppressHydrationWarning>
-            {greeting}
-          </h1>
-          <p className="text-sm text-text-muted mt-0.5" suppressHydrationWarning>
-            {dateStr}
-            {clock && <span className="ml-3 tabular-nums">{clock}</span>}
-          </p>
-        </div>
-
-        {/* Right: controls */}
-        <div className="header-controls flex items-center gap-2">
-          <div className="flex items-center gap-1.5 mr-2">
-            <div 
-              className={`w-2 h-2 rounded-full ${
-                loading ? "bg-amber-400 animate-pulse" : 
-                error ? "bg-red-500" : "bg-green-500"
-              }`}
+      <header className="flex flex-col gap-3 px-6 py-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.28em] text-text-muted">
+              Sonance
+            </div>
+            <div className="mt-1 text-lg font-semibold text-text-heading">
+              Command Center
+            </div>
+          </div>
+          <div className="hidden h-8 w-px bg-white/10 md:block" />
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <div
+              className={loading ? "h-2.5 w-2.5 rounded-full bg-accent-amber animate-pulse" : error ? "h-2.5 w-2.5 rounded-full bg-accent-red" : "h-2.5 w-2.5 rounded-full bg-accent-green"}
               title={loading ? "Syncing..." : error ? `Error: ${error}` : "Data live"}
             />
-            <SyncIndicator isSyncing={isSyncing} lastSyncedAt={lastSyncedAt} syncError={syncError} />
+            <SyncIndicator
+              isSyncing={isSyncing}
+              lastSyncedAt={lastSyncedAt}
+              syncError={syncError}
+            />
           </div>
+        </div>
 
-          {/* Search */}
+        <div className="header-controls flex flex-wrap items-center gap-2 justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenSetup?.()}
+            title="Open Setup & Focus"
+          >
+            Setup & Focus
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -131,7 +113,6 @@ export function Header({
             </svg>
           </Button>
 
-          {/* Refresh */}
           <Button
             variant="ghost"
             size="icon"
@@ -146,7 +127,6 @@ export function Header({
             </svg>
           </Button>
 
-          {/* Theme toggle */}
           <Button
             variant="ghost"
             size="icon"
@@ -154,31 +134,15 @@ export function Header({
             aria-label="Toggle theme"
             title="Toggle dark/light mode"
           >
-            {/* Sun icon (visible in dark mode) */}
             <svg className="hidden dark:block" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="4" />
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
             </svg>
-            {/* Moon icon (visible in light mode) */}
             <svg className="block dark:hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
             </svg>
           </Button>
 
-          {/* Connected Services */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openStudio("connections")}
-            aria-label="Connected services"
-            title="Manage connected services"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-            </svg>
-          </Button>
-
-          {/* Print */}
           <Button
             variant="ghost"
             size="icon"
@@ -193,10 +157,9 @@ export function Header({
             </svg>
           </Button>
 
-          {/* User avatar / sign-out */}
           <button
             onClick={signOut}
-            className="w-8 h-8 rounded-full bg-accent-teal/20 text-accent-teal flex items-center justify-center text-sm font-semibold hover:bg-accent-teal/30 transition-colors cursor-pointer"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-teal/20 text-sm font-semibold text-accent-teal transition-colors hover:bg-accent-teal/30"
             title={`Signed in as ${userName} — click to sign out`}
             aria-label="Sign out"
           >
@@ -204,7 +167,7 @@ export function Header({
           </button>
         </div>
       </header>
-      {/* Command Bar */}
+
       <CommandBar
         items={commandItems}
         isOpen={commandBarOpen}

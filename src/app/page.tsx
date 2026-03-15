@@ -1,70 +1,290 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { Header } from "@/components/layout/Header";
-import { TabBar, type TabId } from "@/components/layout/TabBar";
+
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Footer } from "@/components/layout/Footer";
-import { PriorityView } from "@/components/views/PriorityView";
-import { SalesTabView } from "@/components/views/SalesTabView";
-import { MetricsView } from "@/components/views/MetricsView";
-import { UnifiedPeopleView } from "@/components/views/UnifiedPeopleView";
-import { CalendarView } from "@/components/views/CalendarView";
-import { SignalsView } from "@/components/views/SignalsView";
-import { MindensView } from "@/components/views/MindensView";
-import { DelegationView } from "@/components/views/DelegationView";
-import { MeetingPrepView } from "@/components/views/MeetingPrepView";
-import { DigestView } from "@/components/views/DigestView";
+import { Header } from "@/components/layout/Header";
+import { TabBar } from "@/components/layout/TabBar";
 import { EODSummary } from "@/components/modals/EODSummary";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
-import { WorkspaceStudio } from "@/components/ui/WorkspaceStudio";
+import { CalendarHubView } from "@/components/views/CalendarHubView";
+import { CommunicationsView } from "@/components/views/CommunicationsView";
+import { HomeView } from "@/components/views/HomeView";
+import { OperationsView } from "@/components/views/OperationsView";
+import { PerformanceView } from "@/components/views/PerformanceView";
+import { PeopleHubView } from "@/components/views/PeopleHubView";
+import { SetupFocusView } from "@/components/ui/WorkspaceStudio";
 import { AttentionProvider, useAttention } from "@/lib/attention/client";
 import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
-import { getVisibleTabs } from "@/lib/tab-config";
+import {
+  parseCalendarSubView,
+  parseHomeSubView,
+  parseOperationsSubView,
+  parsePerformanceSubView,
+  parseSetupFocusTab,
+  parseTabId,
+  type CalendarSubView,
+  type HomeSubView,
+  type OperationsSubView,
+  type PerformanceSubView,
+  type SetupFocusTab,
+  type TabId,
+} from "@/lib/tab-config";
 
 export default function Home() {
   return (
     <LiveDataProvider>
       <AttentionProvider>
-        <HomeContent />
+        <Suspense fallback={<HomeShellFallback />}>
+          <HomeContent />
+        </Suspense>
       </AttentionProvider>
     </LiveDataProvider>
   );
 }
 
+function HomeShellFallback() {
+  return (
+    <div className="min-h-screen bg-[var(--bg-primary)] px-4 py-8 md:px-6">
+      <div className="glass-card anim-card h-36 animate-pulse" />
+    </div>
+  );
+}
+
 function HomeContent() {
-  const [activeTab, setActiveTab] = useState<TabId>("digest");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [eodOpen, setEodOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [prepEventId, setPrepEventId] = useState<string | undefined>();
-  const { loading, fetchedAt, error, refetch, connections } = useLiveData();
-  const { focusRevision } = useAttention();
-
-  const visibleTabs = useMemo(
-    () => getVisibleTabs(connections, !!fetchedAt),
-    [connections, fetchedAt]
+  const { loading, fetchedAt, error, refetch } = useLiveData();
+  const { focusRevision, openSetupFocus } = useAttention();
+  const activeTab: TabId = parseTabId(searchParams.get("tab"));
+  const homeSubView: HomeSubView = parseHomeSubView(searchParams.get("sub"));
+  const calendarSubView: CalendarSubView = parseCalendarSubView(
+    searchParams.get("sub")
   );
-  const effectiveActiveTab = useMemo(
-    () => (fetchedAt && !visibleTabs.includes(activeTab) ? "digest" : activeTab),
-    [activeTab, fetchedAt, visibleTabs]
+  const performanceSubView: PerformanceSubView = parsePerformanceSubView(
+    searchParams.get("sub")
+  );
+  const operationsSubView: OperationsSubView = parseOperationsSubView(
+    searchParams.get("sub")
+  );
+  const prepEventId = searchParams.get("eventId") ?? undefined;
+
+  const syncUrl = useCallback(
+    (next: {
+      tab: TabId;
+      sub?: string | null;
+      eventId?: string | null;
+      setupTab?: SetupFocusTab;
+    }) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", next.tab);
+      if (next.sub) params.set("sub", next.sub);
+      else params.delete("sub");
+
+      if (next.eventId) params.set("eventId", next.eventId);
+      else params.delete("eventId");
+
+      if (next.setupTab) params.set("setupTab", next.setupTab);
+      else params.delete("setupTab");
+
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
   );
 
-  const handlePrepNavigate = useCallback((eventId: string) => {
-    setPrepEventId(eventId);
-    setActiveTab("prep");
-  }, []);
-
-  // Listen for navigate-prep custom events from child components
   useEffect(() => {
-    const handler = ((e: CustomEvent<{ eventId: string }>) => {
-      handlePrepNavigate(e.detail.eventId);
+    openSetupFocus(parseSetupFocusTab(searchParams.get("setupTab")));
+  }, [openSetupFocus, searchParams]);
+
+  useEffect(() => {
+    const handler = ((event: CustomEvent<{ eventId: string }>) => {
+      syncUrl({
+        tab: "calendar",
+        sub: "prep",
+        eventId: event.detail.eventId,
+      });
     }) as EventListener;
+
     window.addEventListener("navigate-prep", handler);
     return () => window.removeEventListener("navigate-prep", handler);
-  }, [handlePrepNavigate]);
+  }, [syncUrl]);
 
   useEffect(() => {
     if (focusRevision === 0) return;
     void refetch();
   }, [focusRevision, refetch]);
+
+  useEffect(() => {
+    if (!searchParams.get("tab")) {
+      syncUrl({ tab: "home", sub: "overview" });
+    }
+  }, [searchParams, syncUrl]);
+
+  const navigateToTab = useCallback(
+    (tab: TabId) => {
+      if (tab === "home") {
+        syncUrl({ tab, sub: "overview" });
+        return;
+      }
+
+      if (tab === "calendar") {
+        syncUrl({
+          tab,
+          sub: activeTab === "calendar" ? calendarSubView : "schedule",
+          eventId:
+            activeTab === "calendar" && calendarSubView === "prep"
+              ? prepEventId ?? null
+              : null,
+        });
+        return;
+      }
+
+      if (tab === "performance") {
+        syncUrl({
+          tab,
+          sub: activeTab === "performance" ? performanceSubView : "sales",
+        });
+        return;
+      }
+
+      if (tab === "operations") {
+        syncUrl({
+          tab,
+          sub: activeTab === "operations" ? operationsSubView : "delegation",
+        });
+        return;
+      }
+
+      syncUrl({ tab });
+    },
+    [
+      activeTab,
+      calendarSubView,
+      operationsSubView,
+      performanceSubView,
+      prepEventId,
+      syncUrl,
+    ]
+  );
+
+  const openSetup = useCallback(
+    (tab: SetupFocusTab = "focus") => {
+      openSetupFocus(tab);
+      syncUrl({ tab: "home", sub: "setup", setupTab: tab });
+    },
+    [openSetupFocus, syncUrl]
+  );
+
+  const openHomeOverview = useCallback(() => {
+    syncUrl({ tab: "home", sub: "overview" });
+  }, [syncUrl]);
+
+  const openCalendarPrep = useCallback(
+    (eventId?: string) => {
+      syncUrl({ tab: "calendar", sub: "prep", eventId: eventId ?? null });
+    },
+    [syncUrl]
+  );
+
+  const handleCalendarSubViewChange = useCallback(
+    (subView: CalendarSubView) => {
+      if (activeTab === "calendar") {
+        syncUrl({
+          tab: "calendar",
+          sub: subView,
+          eventId: subView === "prep" ? prepEventId ?? null : null,
+        });
+      }
+    },
+    [activeTab, prepEventId, syncUrl]
+  );
+
+  const handlePerformanceSubViewChange = useCallback(
+    (subView: PerformanceSubView) => {
+      if (activeTab === "performance") {
+        syncUrl({ tab: "performance", sub: subView });
+      }
+    },
+    [activeTab, syncUrl]
+  );
+
+  const handleOperationsSubViewChange = useCallback(
+    (subView: OperationsSubView) => {
+      if (activeTab === "operations") {
+        syncUrl({ tab: "operations", sub: subView });
+      }
+    },
+    [activeTab, syncUrl]
+  );
+
+  const currentView = useMemo(() => {
+    if (activeTab === "home") {
+      return homeSubView === "setup" ? (
+        <SetupFocusView onBack={openHomeOverview} />
+      ) : (
+        <HomeView
+          onNavigate={navigateToTab}
+          onOpenCalendarPrep={openCalendarPrep}
+          onOpenSetup={openSetup}
+        />
+      );
+    }
+
+    if (activeTab === "communications") {
+      return <CommunicationsView onOpenSetup={() => openSetup("focus")} />;
+    }
+
+    if (activeTab === "people") {
+      return <PeopleHubView onOpenSetup={() => openSetup("focus")} />;
+    }
+
+    if (activeTab === "calendar") {
+      return (
+        <CalendarHubView
+          activeSubView={calendarSubView}
+          initialEventId={prepEventId}
+          onOpenSetup={() => openSetup("focus")}
+          onSubViewChange={handleCalendarSubViewChange}
+        />
+      );
+    }
+
+    if (activeTab === "performance") {
+      return (
+        <PerformanceView
+          activeSubView={performanceSubView}
+          onOpenSetup={() => openSetup("connections")}
+          onSubViewChange={handlePerformanceSubViewChange}
+        />
+      );
+    }
+
+    return (
+      <OperationsView
+        activeSubView={operationsSubView}
+        onOpenSetup={() => openSetup("connections")}
+        onSubViewChange={handleOperationsSubViewChange}
+      />
+    );
+  }, [
+    activeTab,
+    calendarSubView,
+    handleCalendarSubViewChange,
+    handleOperationsSubViewChange,
+    handlePerformanceSubViewChange,
+    homeSubView,
+    navigateToTab,
+    openCalendarPrep,
+    openHomeOverview,
+    openSetup,
+    operationsSubView,
+    performanceSubView,
+    prepEventId,
+  ]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -76,35 +296,19 @@ function HomeContent() {
         lastSyncedAt={fetchedAt}
         syncError={error}
         onSearchOpen={() => setSearchOpen(true)}
+        onOpenSetup={() => openSetup("focus")}
       />
 
-      <TabBar
-        activeTab={effectiveActiveTab}
-        onTabChange={setActiveTab}
-        visibleTabIds={visibleTabs}
-        className="mb-5"
-      />
+      <TabBar activeTab={activeTab} onTabChange={navigateToTab} className="mb-5" />
 
-      <main className="px-4 md:px-6 pb-24 md:pb-8">
-        {effectiveActiveTab === "digest"    && <DigestView />}
-        {effectiveActiveTab === "priority"  && <PriorityView />}
-        {effectiveActiveTab === "sales"     && <SalesTabView />}
-        {effectiveActiveTab === "metrics"   && <MetricsView />}
-        {effectiveActiveTab === "people"    && <UnifiedPeopleView />}
-        {effectiveActiveTab === "calendar"  && <CalendarView />}
-        {effectiveActiveTab === "prep"      && <MeetingPrepView initialEventId={prepEventId} />}
-        {effectiveActiveTab === "signals"   && <SignalsView />}
-        {effectiveActiveTab === "minden"    && <MindensView />}
-        {effectiveActiveTab === "delegation" && <DelegationView />}
-      </main>
+      <main className="px-4 pb-24 md:px-6 md:pb-8">{currentView}</main>
 
       <Footer onEodSummary={() => setEodOpen(true)} />
       <EODSummary isOpen={eodOpen} onClose={() => setEodOpen(false)} />
-      <WorkspaceStudio />
       <GlobalSearch
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
-        onNavigate={(tab) => setActiveTab(tab as TabId)}
+        onNavigate={(tab) => navigateToTab(parseTabId(tab))}
       />
     </div>
   );

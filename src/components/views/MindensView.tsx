@@ -109,7 +109,7 @@ export function MindensView() {
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard label="Active Orders" value={activeOrders.length} color="text-text-heading" delay="0ms" />
-        <KPICard label="Minden Orders" value={mindenCount} color="text-accent-amber" delay="60ms" />
+        <KPICard label="Primary Site Orders" value={mindenCount} color="text-accent-amber" delay="60ms" />
         <KPICard label="Bonita Orders" value={bonitaCount} color="text-accent-teal" delay="120ms" />
         <KPICard label="Needs Attention" value={attentionOrders.length} color="text-accent-red" delay="180ms" />
       </div>

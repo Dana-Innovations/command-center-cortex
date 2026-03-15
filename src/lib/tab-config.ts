@@ -1,45 +1,107 @@
-import type { TabId } from "@/components/layout/TabBar";
 import type { ConnectionStatus } from "@/lib/live-data-context";
 
-interface TabRequirement {
-  id: TabId;
-  /** Which connections this tab needs. Empty = always visible. */
-  connections: (keyof ConnectionStatus)[];
-  /** If true, ALL listed connections required. If false, ANY suffices. */
-  requireAll: boolean;
-}
+export type TabId =
+  | "home"
+  | "communications"
+  | "people"
+  | "calendar"
+  | "performance"
+  | "operations";
 
-const TAB_REQUIREMENTS: TabRequirement[] = [
-  { id: "digest",     connections: [],                                       requireAll: false },
-  { id: "priority",   connections: ["m365", "asana", "slack"],               requireAll: false },
-  { id: "sales",      connections: ["salesforce"],                           requireAll: true  },
-  { id: "metrics",    connections: ["powerbi"],                              requireAll: true  },
-  { id: "people",     connections: ["m365", "salesforce", "asana", "slack"], requireAll: false },
-  { id: "calendar",   connections: ["m365"],                                 requireAll: true  },
-  { id: "prep",       connections: ["m365"],                                 requireAll: true  },
-  { id: "signals",    connections: ["m365", "slack"],                        requireAll: false },
-  { id: "minden",     connections: ["monday"],                               requireAll: true  },
-  { id: "delegation", connections: ["asana"],                                requireAll: true  },
+export type HomeSubView = "overview" | "setup";
+export type CalendarSubView = "schedule" | "prep";
+export type PerformanceSubView = "sales" | "metrics";
+export type OperationsSubView = "delegation" | "orders";
+export type SetupFocusTab = "connections" | "focus" | "advanced";
+
+export const ALL_TAB_IDS: TabId[] = [
+  "home",
+  "communications",
+  "people",
+  "calendar",
+  "performance",
+  "operations",
 ];
 
-/** All tab IDs in display order. */
-export const ALL_TAB_IDS: TabId[] = TAB_REQUIREMENTS.map((t) => t.id);
+export type SurfaceAvailability =
+  | { connected: true }
+  | {
+      connected: false;
+      services: Array<keyof ConnectionStatus>;
+    };
 
-/**
- * Returns the list of tabs the user should see based on their connections.
- * During initial load (before first fetch), returns all tabs to prevent flash.
- */
-export function getVisibleTabs(
-  connections: ConnectionStatus,
-  hasFetched: boolean
-): TabId[] {
-  if (!hasFetched) return ALL_TAB_IDS;
+export function getSurfaceAvailability(
+  tab: TabId,
+  connections: ConnectionStatus
+): SurfaceAvailability {
+  switch (tab) {
+    case "home":
+      return { connected: true };
+    case "communications":
+      return connections.m365 || connections.slack || connections.asana
+        ? { connected: true }
+        : { connected: false, services: ["m365", "slack", "asana"] };
+    case "people":
+      return connections.m365 ||
+        connections.salesforce ||
+        connections.asana ||
+        connections.slack
+        ? { connected: true }
+        : {
+            connected: false,
+            services: ["m365", "salesforce", "asana", "slack"],
+          };
+    case "calendar":
+      return connections.m365
+        ? { connected: true }
+        : { connected: false, services: ["m365"] };
+    case "performance":
+      return connections.salesforce || connections.powerbi
+        ? { connected: true }
+        : { connected: false, services: ["salesforce", "powerbi"] };
+    case "operations":
+      return connections.asana || connections.monday
+        ? { connected: true }
+        : { connected: false, services: ["asana", "monday"] };
+    default:
+      return { connected: true };
+  }
+}
 
-  return TAB_REQUIREMENTS.filter((tab) => {
-    if (tab.connections.length === 0) return true;
-    if (tab.requireAll) {
-      return tab.connections.every((svc) => connections[svc]);
-    }
-    return tab.connections.some((svc) => connections[svc]);
-  }).map((tab) => tab.id);
+export function parseTabId(value: string | null | undefined): TabId {
+  return ALL_TAB_IDS.includes(value as TabId) ? (value as TabId) : "home";
+}
+
+export function parseHomeSubView(
+  value: string | null | undefined
+): HomeSubView {
+  return value === "setup" ? "setup" : "overview";
+}
+
+export function parseCalendarSubView(
+  value: string | null | undefined
+): CalendarSubView {
+  return value === "prep" ? "prep" : "schedule";
+}
+
+export function parsePerformanceSubView(
+  value: string | null | undefined
+): PerformanceSubView {
+  return value === "metrics" ? "metrics" : "sales";
+}
+
+export function parseOperationsSubView(
+  value: string | null | undefined
+): OperationsSubView {
+  return value === "orders" ? "orders" : "delegation";
+}
+
+export function parseSetupFocusTab(
+  value: string | null | undefined
+): SetupFocusTab {
+  if (value === "connections" || value === "advanced") {
+    return value;
+  }
+
+  return "focus";
 }

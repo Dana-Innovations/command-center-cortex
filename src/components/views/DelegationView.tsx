@@ -821,9 +821,9 @@ export function DelegationView() {
 
       {/* ── KPI Row ─────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="My Monkeys" value={myMonkeys.length} color="text-accent-amber" delay="160ms" />
+        <KPICard label="Priority Tasks" value={myMonkeys.length} color="text-accent-amber" delay="160ms" />
         <KPICard label="Delegated Out" value={delegatedMonkeys.length} color="text-accent-teal" delay="240ms" />
-        <KPICard label="Gorillas Active" value={gorillas.length} color="text-[#5BB5F5]" delay="320ms" />
+        <KPICard label="Major Initiatives" value={gorillas.length} color="text-[#5BB5F5]" delay="320ms" />
         <KPICard label="At Risk" value={atRisk.length} color="text-accent-red" delay="400ms" />
       </div>
 
@@ -831,9 +831,9 @@ export function DelegationView() {
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
         {/* ── Left Column ───────────────────────────────────────────────────── */}
         <div className="space-y-5">
-          {/* My Monkeys */}
+          {/* Priority Tasks */}
           <section className="glass-card anim-card p-5" style={{ animationDelay: "480ms" }}>
-            <SectionHeader icon={MonkeyIcon} title="My Monkeys" count={myMonkeys.length} countColor="bg-accent-amber/15 text-accent-amber" />
+            <SectionHeader icon={MonkeyIcon} title="Priority Tasks" count={myMonkeys.length} countColor="bg-accent-amber/15 text-accent-amber" />
             {loading && myMonkeys.length === 0 && <SkeletonRows />}
             {!loading && myMonkeys.length === 0 && <EmptyState />}
             <div className="space-y-0 divide-y divide-[var(--bg-card-border)]">
@@ -872,9 +872,9 @@ export function DelegationView() {
             </div>
           </section>
 
-          {/* Delegated Monkeys */}
+          {/* Delegated Work */}
           <section className="glass-card anim-card p-5" style={{ animationDelay: "560ms" }}>
-            <SectionHeader icon={DelegatedIcon} title="Delegated Monkeys" count={delegatedMonkeys.length} countColor="bg-accent-teal/15 text-accent-teal" />
+            <SectionHeader icon={DelegatedIcon} title="Delegated Work" count={delegatedMonkeys.length} countColor="bg-accent-teal/15 text-accent-teal" />
             {loading && delegatedMonkeys.length === 0 && <SkeletonRows />}
             {!loading && delegatedMonkeys.length === 0 && <EmptyState />}
             <div className="space-y-0 divide-y divide-[var(--bg-card-border)]">
@@ -925,9 +925,9 @@ export function DelegationView() {
             </div>
           </section>
 
-          {/* Gorillas in Flight */}
+          {/* Major Initiatives */}
           <section className="glass-card anim-card p-5" style={{ animationDelay: "640ms" }}>
-            <SectionHeader icon={GorillaIcon} title="Gorillas in Flight" count={gorillas.length} countColor="bg-[rgba(91,181,245,0.15)] text-[#5BB5F5]" />
+            <SectionHeader icon={GorillaIcon} title="Major Initiatives" count={gorillas.length} countColor="bg-[rgba(91,181,245,0.15)] text-[#5BB5F5]" />
             {loading && gorillas.length === 0 && <SkeletonRows />}
             {!loading && gorillas.length === 0 && <EmptyState />}
             <div className="space-y-0 divide-y divide-[var(--bg-card-border)]">

@@ -12,8 +12,8 @@ import { cn } from "@/lib/utils";
 
 const TABS = [
   { id: "connections", label: "Connections" },
-  { id: "focus", label: "Focus Map" },
-  { id: "learning", label: "Learning" },
+  { id: "focus", label: "Focus" },
+  { id: "advanced", label: "Advanced learning" },
 ] as const;
 
 const IMPORTANCE_OPTIONS: Array<{
@@ -164,7 +164,11 @@ function FocusTree({
   );
 }
 
-export function WorkspaceStudio() {
+interface SetupFocusViewProps {
+  onBack?: () => void;
+}
+
+export function SetupFocusView({ onBack }: SetupFocusViewProps) {
   const {
     profile,
     focusProviders,
@@ -172,10 +176,8 @@ export function WorkspaceStudio() {
     profileLoading,
     focusMapLoading,
     servicesLoading,
-    studioOpen,
-    studioTab,
-    closeStudio,
-    setStudioTab,
+    setupTab,
+    setSetupTab,
     refreshServices,
     ensureTeamChannels,
     setNodeImportance,
@@ -286,44 +288,86 @@ export function WorkspaceStudio() {
     [setNodeImportance]
   );
 
-  if (!studioOpen) return null;
+  const connectedCount = services.filter((service) => service.connected).length;
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
-      <div className="relative flex h-[min(90vh,880px)] w-full max-w-7xl flex-col overflow-hidden rounded-[28px] border border-[var(--bg-card-border)] bg-[linear-gradient(180deg,rgba(0,163,225,0.08),rgba(255,255,255,0.02))] shadow-2xl">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,178,169,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(232,93,93,0.08),transparent_32%)]" />
-        <div className="relative flex items-start justify-between gap-6 border-b border-[var(--bg-card-border)] px-6 py-5">
-          <div>
+    <div className="space-y-5">
+      <section className="glass-card anim-card overflow-hidden" style={{ animationDelay: "60ms" }}>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,163,225,0.16),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(0,178,169,0.12),transparent_32%)]" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-3xl">
             <div className="text-[11px] uppercase tracking-[0.28em] text-accent-amber">
-              Workspace Studio
+              Setup & Focus
             </div>
-            <h2 className="mt-2 font-display text-2xl font-semibold text-text-heading">
-              Shape what rises, fades, and learns.
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm text-text-muted">
-              Connections define what is available. The Focus Map defines what
-              matters structurally. Learning shows how your item-level feedback is
-              nudging the system over time.
+            <h1 className="mt-3 font-display text-3xl font-semibold leading-tight text-text-heading">
+              Shape what rises, fades, and gets your attention first.
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-muted">
+              Connect the systems you care about, set structural focus once, and
+              let lightweight learning fine-tune the queue over time.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={closeStudio}
-            className="rounded-2xl border border-[var(--bg-card-border)] bg-black/10 px-3 py-2 text-sm text-text-muted transition-colors hover:text-text-body"
-          >
-            Close
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onBack && (
+              <Button variant="secondary" size="sm" onClick={onBack}>
+                Back to Home
+              </Button>
+            )}
+            <Button variant="primary" size="sm" onClick={() => void completeOnboarding()}>
+              Finish setup
+            </Button>
+          </div>
         </div>
 
-        <div className="relative flex items-center gap-2 border-b border-[var(--bg-card-border)] px-6 py-4">
+        <div className="relative mt-5 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-[var(--bg-card-border)] bg-black/10 p-4">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              Step 1
+            </div>
+            <div className="mt-2 text-lg font-semibold text-text-heading">
+              Connect your systems
+            </div>
+            <p className="mt-2 text-sm text-text-muted">
+              {connectedCount} of {services.length} services connected.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-[var(--bg-card-border)] bg-black/10 p-4">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              Step 2
+            </div>
+            <div className="mt-2 text-lg font-semibold text-text-heading">
+              Define focus
+            </div>
+            <p className="mt-2 text-sm text-text-muted">
+              {(profile?.focusPreferences ?? []).length} structural focus rule
+              {(profile?.focusPreferences ?? []).length === 1 ? "" : "s"} saved.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-[var(--bg-card-border)] bg-black/10 p-4">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              Step 3
+            </div>
+            <div className="mt-2 text-lg font-semibold text-text-heading">
+              Review learning
+            </div>
+            <p className="mt-2 text-sm text-text-muted">
+              Feedback stays conservative and never overrides explicit focus.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass-card anim-card overflow-hidden" style={{ animationDelay: "120ms" }}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--bg-card-border)] pb-4">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setStudioTab(tab.id)}
+              onClick={() => setSetupTab(tab.id)}
               className={cn(
                 "rounded-2xl px-4 py-2 text-sm font-medium transition-colors",
-                studioTab === tab.id
+                setupTab === tab.id
                   ? "bg-[var(--tab-active-bg)] text-text-heading"
                   : "text-text-muted hover:text-text-body"
               )}
@@ -331,318 +375,312 @@ export function WorkspaceStudio() {
               {tab.label}
             </button>
           ))}
-          <div className="ml-auto">
-            <Button variant="primary" size="sm" onClick={() => void completeOnboarding()}>
-              Finish Setup
-            </Button>
-          </div>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          {studioTab === "connections" && (
-            <div className="grid h-full gap-5 overflow-y-auto px-6 py-5 lg:grid-cols-[1.1fr_0.9fr]">
-              <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-text-heading">
-                      Connected services
-                    </h3>
-                    <p className="mt-1 text-sm text-text-muted">
-                      Connect Cortex providers here, then prioritize what matters in
-                      the map.
-                    </p>
-                  </div>
-                  <Button variant="secondary" size="sm" onClick={() => void refreshServices()}>
-                    Refresh
-                  </Button>
-                </div>
-
-                <div className="mt-5 space-y-3">
-                  {(servicesLoading ? [] : services).map((service) => (
-                    <div
-                      key={service.provider}
-                      className="flex items-center justify-between rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "h-2.5 w-2.5 rounded-full",
-                              service.connected ? "bg-accent-green" : "bg-text-muted/40"
-                            )}
-                          />
-                          <span className="text-sm font-medium text-text-heading">
-                            {service.label}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs text-text-muted">
-                          {service.connected
-                            ? service.account_email || "Connected"
-                            : service.description}
-                        </div>
-                      </div>
-                      {!service.connected && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={connecting === service.provider}
-                          onClick={() => void handleConnect(service.provider)}
-                        >
-                          {connecting === service.provider ? "Connecting..." : "Connect"}
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  {servicesLoading && (
-                    <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
-                      Loading connected services...
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
-                <h3 className="text-lg font-semibold text-text-heading">
-                  What happens next
-                </h3>
-                <div className="mt-4 space-y-4 text-sm text-text-muted">
-                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
-                    The Focus Map lets you assign structural importance to mail
-                    folders, calendars, Asana projects, Teams spaces, and Slack
-                    channels.
-                  </div>
-                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
-                    Item feedback then learns gently from what should have been
-                    raised, lowered, or kept at the same level.
-                  </div>
-                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
-                    Explicit focus stays dominant. Learning acts like trim, not the
-                    steering wheel.
-                  </div>
-                </div>
-              </section>
-            </div>
-          )}
-
-          {studioTab === "focus" && (
-            <div className="grid h-full gap-5 overflow-hidden px-6 py-5 xl:grid-cols-[250px_minmax(0,1fr)_300px]">
-              <section className="overflow-y-auto rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-4">
-                <div className="mb-4">
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-                    Providers
-                  </div>
+        {setupTab === "connections" && (
+          <div className="grid gap-5 pt-5 lg:grid-cols-[1.1fr_0.9fr]">
+            <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-text-heading">
+                    Connected services
+                  </h2>
                   <p className="mt-1 text-sm text-text-muted">
-                    Start broad, then drill into specific resources.
+                    Connect the sources that should appear in the command center.
                   </p>
                 </div>
-                <div className="space-y-2">
-                  {focusProviders.map((provider) => {
-                    const explicitCount = (profile?.focusPreferences ?? []).filter(
-                      (entry) => entry.provider === provider.provider
-                    ).length;
-                    return (
-                      <button
-                        key={provider.provider}
-                        type="button"
-                        onClick={() => setSelectedProvider(provider.provider)}
-                        className={cn(
-                          "w-full rounded-2xl border px-3 py-3 text-left transition-colors",
-                          provider.provider === providerNode?.provider
-                            ? "border-accent-amber/40 bg-[var(--tab-active-bg)]"
-                            : "border-[var(--bg-card-border)] bg-white/[0.03] hover:bg-white/[0.06]"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-text-heading">
-                            {provider.label}
-                          </span>
-                          <span className="text-[10px] uppercase tracking-[0.18em] text-text-muted">
-                            {provider.importance}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs text-text-muted">
-                          {explicitCount > 0
-                            ? `${explicitCount} saved focus rules`
-                            : provider.description}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
+                <Button variant="secondary" size="sm" onClick={() => void refreshServices()}>
+                  Refresh
+                </Button>
+              </div>
 
-              <section className="flex min-h-0 flex-col overflow-hidden rounded-[24px] border border-[var(--bg-card-border)] bg-black/10">
-                <div className="border-b border-[var(--bg-card-border)] px-5 py-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="mt-5 space-y-3">
+                {(servicesLoading ? [] : services).map((service) => (
+                  <div
+                    key={service.provider}
+                    className="flex items-center justify-between rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4"
+                  >
                     <div>
-                      <h3 className="text-lg font-semibold text-text-heading">
-                        {providerNode?.label ?? "Focus Map"}
-                      </h3>
-                      <p className="mt-1 text-sm text-text-muted">
-                        Set the attention tier for the resources that matter most.
-                      </p>
-                    </div>
-                    <input
-                      type="search"
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search folders, projects, teams..."
-                      className="h-10 w-full rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.04] px-3 text-sm text-text-heading outline-none placeholder:text-text-muted lg:w-72"
-                    />
-                  </div>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                  {focusMapLoading || profileLoading ? (
-                    <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
-                      Loading focus map...
-                    </div>
-                  ) : filteredNodes.length === 0 ? (
-                    <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
-                      No matching resources yet.
-                    </div>
-                  ) : (
-                    <FocusTree
-                      nodes={filteredNodes}
-                      pendingNodeId={pendingNodeId}
-                      onSelectNode={(node) => void handleSelectNode(node)}
-                      onChangeImportance={(node, next) =>
-                        void handleChangeImportance(node, next)
-                      }
-                    />
-                  )}
-                </div>
-              </section>
-
-              <section className="overflow-y-auto rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
-                <h3 className="text-lg font-semibold text-text-heading">
-                  Live preview
-                </h3>
-                <p className="mt-1 text-sm text-text-muted">
-                  This is the current structural focus profile that will drive
-                  default surfacing and fetch priority.
-                </p>
-
-                <div className="mt-5 space-y-5">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-accent-green">
-                      What will rise
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {preview.rise.length > 0 ? (
-                        preview.rise.map((record) => (
-                          <div
-                            key={`${record.provider}-${record.entity_type}-${record.entity_id}`}
-                            className="rounded-2xl border border-accent-green/20 bg-accent-green/10 px-3 py-3 text-sm text-text-body"
-                          >
-                            <div className="font-medium text-text-heading">
-                              {record.label_snapshot || record.entity_id}
-                            </div>
-                            <div className="mt-1 text-xs text-text-muted">
-                              {record.provider} · {record.entity_type}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
-                          No critical focus rules yet.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-accent-red">
-                      What will fade
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {preview.fade.length > 0 ? (
-                        preview.fade.map((record) => (
-                          <div
-                            key={`${record.provider}-${record.entity_type}-${record.entity_id}`}
-                            className="rounded-2xl border border-accent-red/20 bg-accent-red/10 px-3 py-3 text-sm text-text-body"
-                          >
-                            <div className="font-medium text-text-heading">
-                              {record.label_snapshot || record.entity_id}
-                            </div>
-                            <div className="mt-1 text-xs text-text-muted">
-                              {record.provider} · {record.importance}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
-                          No quiet or muted rules yet.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-          )}
-
-          {studioTab === "learning" && (
-            <div className="grid h-full gap-5 overflow-y-auto px-6 py-5 lg:grid-cols-[1fr_1fr]">
-              <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
-                <h3 className="text-lg font-semibold text-text-heading">
-                  Recent item feedback
-                </h3>
-                <p className="mt-1 text-sm text-text-muted">
-                  Every Raise, Right level, and Lower action is stored here so the
-                  attention system can learn conservatively over time.
-                </p>
-
-                <div className="mt-5 space-y-4">
-                  {(["raise", "right", "lower"] as AttentionFeedbackValue[]).map(
-                    (feedback) => (
-                      <div key={feedback}>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-                          {FEEDBACK_LABELS[feedback]}
-                        </div>
-                        <div className="mt-2 space-y-2">
-                          {feedbackStats[feedback].length > 0 ? (
-                            feedbackStats[feedback].map((item) => (
-                              <div
-                                key={`${item.item_type}-${item.item_id}`}
-                                className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3"
-                              >
-                                <div className="text-sm font-medium text-text-heading">
-                                  {item.title || item.item_id}
-                                </div>
-                                <div className="mt-1 text-xs text-text-muted">
-                                  {item.provider} · {item.surface}
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
-                              No {feedback} feedback yet.
-                            </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "h-2.5 w-2.5 rounded-full",
+                            service.connected ? "bg-accent-green" : "bg-text-muted/40"
                           )}
-                        </div>
+                        />
+                        <span className="text-sm font-medium text-text-heading">
+                          {service.label}
+                        </span>
                       </div>
-                    )
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
-                <h3 className="text-lg font-semibold text-text-heading">
-                  Learned bias signals
-                </h3>
-                <p className="mt-1 text-sm text-text-muted">
-                  These are the strongest current nudges. They are bounded so they
-                  can inform ranking without overpowering your explicit focus map.
-                </p>
-                <div className="mt-5 space-y-2">
-                  {feedbackStats.biases.length > 0 ? (
-                    feedbackStats.biases.map((bias) => (
-                      <div
-                        key={`${bias.dimension_type}-${bias.dimension_key}`}
-                        className="flex items-center justify-between rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3"
+                      <div className="mt-1 text-xs text-text-muted">
+                        {service.connected
+                          ? service.account_email || "Connected"
+                          : service.description}
+                      </div>
+                    </div>
+                    {!service.connected && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={connecting === service.provider}
+                        onClick={() => void handleConnect(service.provider)}
                       >
-                        <div className="min-w-0">
+                        {connecting === service.provider ? "Connecting..." : "Connect"}
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                {servicesLoading && (
+                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
+                    Loading connected services...
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
+              <h2 className="text-lg font-semibold text-text-heading">
+                What happens next
+              </h2>
+              <div className="mt-4 space-y-4 text-sm text-text-muted">
+                <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
+                  Once connected, those sources become available across Home and the
+                  domain tabs.
+                </div>
+                <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
+                  Focus rules tell the system which folders, projects, calendars,
+                  and channels deserve structural priority.
+                </div>
+                <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-4">
+                  Learning only trims the edges. Your explicit focus rules remain the
+                  steering wheel.
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {setupTab === "focus" && (
+          <div className="grid gap-5 overflow-hidden pt-5 xl:grid-cols-[250px_minmax(0,1fr)_300px]">
+            <section className="overflow-y-auto rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-4">
+              <div className="mb-4">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                  Providers
+                </div>
+                <p className="mt-1 text-sm text-text-muted">
+                  Start broad, then drill into the specific resources that matter.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {focusProviders.map((provider) => {
+                  const explicitCount = (profile?.focusPreferences ?? []).filter(
+                    (entry) => entry.provider === provider.provider
+                  ).length;
+                  return (
+                    <button
+                      key={provider.provider}
+                      type="button"
+                      onClick={() => setSelectedProvider(provider.provider)}
+                      className={cn(
+                        "w-full rounded-2xl border px-3 py-3 text-left transition-colors",
+                        provider.provider === providerNode?.provider
+                          ? "border-accent-amber/40 bg-[var(--tab-active-bg)]"
+                          : "border-[var(--bg-card-border)] bg-white/[0.03] hover:bg-white/[0.06]"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-text-heading">
+                          {provider.label}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-[0.18em] text-text-muted">
+                          {provider.importance}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-text-muted">
+                        {explicitCount > 0
+                          ? `${explicitCount} saved focus rules`
+                          : provider.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="flex min-h-0 flex-col overflow-hidden rounded-[24px] border border-[var(--bg-card-border)] bg-black/10">
+              <div className="border-b border-[var(--bg-card-border)] px-5 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-text-heading">
+                      {providerNode?.label ?? "Focus"}
+                    </h2>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Set the attention tier for the resources that matter most.
+                    </p>
+                  </div>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search folders, projects, teams..."
+                    className="h-10 w-full rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.04] px-3 text-sm text-text-heading outline-none placeholder:text-text-muted lg:w-72"
+                  />
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                {focusMapLoading || profileLoading ? (
+                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
+                    Loading focus map...
+                  </div>
+                ) : filteredNodes.length === 0 ? (
+                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] p-5 text-sm text-text-muted">
+                    No matching resources yet.
+                  </div>
+                ) : (
+                  <FocusTree
+                    nodes={filteredNodes}
+                    pendingNodeId={pendingNodeId}
+                    onSelectNode={(node) => void handleSelectNode(node)}
+                    onChangeImportance={(node, next) =>
+                      void handleChangeImportance(node, next)
+                    }
+                  />
+                )}
+              </div>
+            </section>
+
+            <section className="overflow-y-auto rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
+              <h2 className="text-lg font-semibold text-text-heading">
+                Live preview
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                This is the current structural focus profile that will drive
+                default surfacing and fetch priority.
+              </p>
+
+              <div className="mt-5 space-y-5">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-accent-green">
+                    What will rise
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {preview.rise.length > 0 ? (
+                      preview.rise.map((record) => (
+                        <div
+                          key={`${record.provider}-${record.entity_type}-${record.entity_id}`}
+                          className="rounded-2xl border border-accent-green/20 bg-accent-green/10 px-3 py-3 text-sm text-text-body"
+                        >
+                          <div className="font-medium text-text-heading">
+                            {record.label_snapshot || record.entity_id}
+                          </div>
+                          <div className="mt-1 text-xs text-text-muted">
+                            {record.provider} · {record.entity_type}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
+                        No critical focus rules yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-accent-red">
+                    What will fade
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {preview.fade.length > 0 ? (
+                      preview.fade.map((record) => (
+                        <div
+                          key={`${record.provider}-${record.entity_type}-${record.entity_id}`}
+                          className="rounded-2xl border border-accent-red/20 bg-accent-red/10 px-3 py-3 text-sm text-text-body"
+                        >
+                          <div className="font-medium text-text-heading">
+                            {record.label_snapshot || record.entity_id}
+                          </div>
+                          <div className="mt-1 text-xs text-text-muted">
+                            {record.provider} · {record.importance}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
+                        No quiet or muted rules yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {setupTab === "advanced" && (
+          <div className="grid gap-5 pt-5 lg:grid-cols-[1fr_1fr]">
+            <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
+              <h2 className="text-lg font-semibold text-text-heading">
+                Recent item feedback
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                Raised, lowered, and right-level feedback is stored here so the
+                system can learn conservatively over time.
+              </p>
+
+              <div className="mt-5 space-y-4">
+                {(["raise", "right", "lower"] as AttentionFeedbackValue[]).map(
+                  (feedback) => (
+                    <div key={feedback}>
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                        {FEEDBACK_LABELS[feedback]}
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {feedbackStats[feedback].length > 0 ? (
+                          feedbackStats[feedback].map((item) => (
+                            <div
+                              key={`${item.item_type}-${item.item_id}`}
+                              className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3"
+                            >
+                              <div className="text-sm font-medium text-text-heading">
+                                {item.title || item.item_id}
+                              </div>
+                              <div className="mt-1 text-xs text-text-muted">
+                                {item.provider} · {item.surface}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
+                            No {feedback} feedback yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-[24px] border border-[var(--bg-card-border)] bg-black/10 p-5">
+              <h2 className="text-lg font-semibold text-text-heading">
+                Bias snapshot
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                Learned adjustments are intentionally small and should only trim
+                around your explicit focus map.
+              </p>
+
+              <div className="mt-5 space-y-2">
+                {feedbackStats.biases.length > 0 ? (
+                  feedbackStats.biases.map((bias) => (
+                    <div
+                      key={`${bias.dimension_type}-${bias.dimension_key}`}
+                      className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
                           <div className="text-sm font-medium text-text-heading">
                             {bias.dimension_key}
                           </div>
@@ -653,28 +691,33 @@ export function WorkspaceStudio() {
                         <div
                           className={cn(
                             "rounded-full px-2.5 py-1 text-xs font-semibold",
-                            bias.bias_score >= 0
-                              ? "bg-accent-green/10 text-accent-green"
-                              : "bg-accent-red/10 text-accent-red"
+                            bias.bias_score > 0
+                              ? "bg-accent-green/15 text-accent-green"
+                              : bias.bias_score < 0
+                                ? "bg-accent-red/15 text-accent-red"
+                                : "bg-white/10 text-text-muted"
                           )}
                         >
-                          {bias.bias_score >= 0 ? "+" : ""}
-                          {bias.bias_score.toFixed(2)}
+                          {bias.bias_score > 0 ? "+" : ""}
+                          {bias.bias_score}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
-                      Learned bias will appear once you start using the feedback
-                      controls across the app.
                     </div>
-                  )}
-                </div>
-              </section>
-            </div>
-          )}
-        </div>
-      </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-[var(--bg-card-border)] bg-white/[0.03] px-3 py-3 text-sm text-text-muted">
+                    No learned bias data yet.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+      </section>
     </div>
   );
+}
+
+export function WorkspaceStudio() {
+  return <SetupFocusView />;
 }

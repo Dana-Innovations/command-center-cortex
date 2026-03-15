@@ -247,7 +247,7 @@ export function DigestView() {
   const { orders, loading: mondayLoading } = useMonday();
   const { comments: asanaComments, loading: commentsLoading } = useAsanaComments();
   const connections = useConnections();
-  const { profile, openStudio, applyTarget } = useAttention();
+  const { profile, openSetupFocus, applyTarget } = useAttention();
 
   const selectedProjectGids = useMemo(
     () =>
@@ -1173,7 +1173,7 @@ export function DigestView() {
                   </span>
                 )}
                 <button
-                  onClick={() => openStudio("focus")}
+                  onClick={() => openSetupFocus("focus")}
                   className="rounded-lg bg-white/5 px-2.5 py-1 text-[11px] font-medium text-text-muted transition-colors hover:bg-white/10 hover:text-text-body"
                   title="Open focus map"
                 >
@@ -1595,7 +1595,7 @@ export function DigestView() {
               </div>
             </div>
             <button
-              onClick={() => openStudio("connections")}
+              onClick={() => openSetupFocus("connections")}
               className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-text-primary transition-colors cursor-pointer"
             >
               Manage
