@@ -10,6 +10,7 @@ import type {
   AttentionFeedbackValue,
   AttentionProfile,
   FocusNode,
+  FocusPreferenceRecord,
   ImportanceTier,
 } from "@/lib/attention/types";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,97 @@ const PROVIDER_CONNECTION_LABELS: Record<AttentionProvider, string> = {
   teams: "Microsoft 365",
   slack: "Slack",
 };
+
+const DIMENSION_TYPE_LABELS: Record<string, string> = {
+  resource: "Resource",
+  actor: "Person",
+  topic: "Topic",
+  provider: "Provider",
+};
+
+const SURFACE_LABELS: Record<string, string> = {
+  "reply-center": "Reply Center",
+  digest: "Digest",
+  signals: "Signals",
+};
+
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  mail_root: "Email",
+  mail_folder: "Mail Folder",
+  calendar_root: "Calendar",
+  calendar: "Calendar",
+  asana_project: "Asana Project",
+  teams_team: "Teams Team",
+  teams_channel: "Teams Channel",
+  slack_channel: "Slack Channel",
+};
+
+function buildLabelLookup(
+  focusPreferences: FocusPreferenceRecord[]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const record of focusPreferences) {
+    const key = `${record.provider}::${record.entity_type}::${record.entity_id}`;
+    const label = record.label_snapshot?.trim();
+    if (label) map.set(key, label);
+  }
+  return map;
+}
+
+function formatDimensionKey(
+  dimensionType: string,
+  dimensionKey: string,
+  labelLookup: Map<string, string>
+): string {
+  if (dimensionType === "resource") {
+    const label = labelLookup.get(dimensionKey);
+    if (label) return label;
+    const parts = dimensionKey.split("::");
+    if (parts.length === 3) {
+      const [, entityType] = parts;
+      if (entityType === "mail_root") return "Email";
+      if (entityType === "calendar_root") return "Calendar";
+      return ENTITY_TYPE_LABELS[entityType] ?? entityType.replace(/_/g, " ");
+    }
+    return dimensionKey;
+  }
+
+  if (dimensionType === "actor") {
+    const parts = dimensionKey.split(":");
+    if (parts.length >= 3) {
+      const name = parts.slice(2).join(":");
+      return name
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+    return dimensionKey;
+  }
+
+  if (dimensionType === "topic") {
+    const parts = dimensionKey.split(":");
+    if (parts.length >= 2) {
+      const word = parts.slice(1).join(":");
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }
+    return dimensionKey;
+  }
+
+  if (dimensionType === "provider") {
+    const raw = dimensionKey.replace(/^provider:/, "");
+    return PROVIDER_CONNECTION_LABELS[raw as AttentionProvider] ?? raw.replace(/_/g, " ");
+  }
+
+  return dimensionKey;
+}
+
+function formatProviderName(provider: string): string {
+  return PROVIDER_CONNECTION_LABELS[provider as AttentionProvider] ?? provider.replace(/_/g, " ");
+}
+
+function formatSurfaceName(surface: string): string {
+  return SURFACE_LABELS[surface] ?? surface.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 interface FocusPreviewRecord {
   key: string;
@@ -396,6 +488,11 @@ export function SetupFocusView({ onBack }: SetupFocusViewProps) {
       biases: (profile?.biases ?? []).slice(0, 10),
     };
   }, [profile]);
+
+  const labelLookup = useMemo(
+    () => buildLabelLookup(profile?.focusPreferences ?? []),
+    [profile]
+  );
 
   const handleConnect = useCallback(
     async (provider: string) => {
@@ -1031,7 +1128,7 @@ export function SetupFocusView({ onBack }: SetupFocusViewProps) {
                                 {item.title || item.item_id}
                               </div>
                               <div className="mt-1 text-xs text-text-muted">
-                                {item.provider} · {item.surface}
+                                {formatProviderName(item.provider)} · {formatSurfaceName(item.surface)}
                               </div>
                             </div>
                           ))
@@ -1066,10 +1163,10 @@ export function SetupFocusView({ onBack }: SetupFocusViewProps) {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="text-sm font-medium text-text-heading">
-                            {bias.dimension_key}
+                            {formatDimensionKey(bias.dimension_type, bias.dimension_key, labelLookup)}
                           </div>
                           <div className="mt-1 text-xs text-text-muted">
-                            {bias.dimension_type} · {bias.sample_count} samples
+                            {DIMENSION_TYPE_LABELS[bias.dimension_type] ?? bias.dimension_type} · {bias.sample_count} samples
                           </div>
                         </div>
                         <div
