@@ -50,7 +50,11 @@ function shouldExclude(name: string, email: string): boolean {
 }
 
 function normalizeName(name: string): string {
-  return name.replace(/<.*>/, '').replace(/\(.*\)/, '').trim();
+  return name
+    .replace(/<.*>/, '')
+    .replace(/\(.*\)/, '')
+    .replace(/\s*[\u2013\u2014-]\s*(Forward|Fwd|Delegate|Shared|On Behalf Of)\s*$/i, '')
+    .trim();
 }
 
 function chatMatchesPerson(chatTopic: string, personName: string): boolean {
