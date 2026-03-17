@@ -189,6 +189,62 @@ export function matchesOpp(
   return false;
 }
 
+// ── Email Thread Grouping ─────────────────────────────────────────────────
+
+export type GroupedFeedItem =
+  | { type: "single"; item: TouchpointItem }
+  | { type: "thread"; key: string; items: TouchpointItem[]; count: number };
+
+export function normalizeEmailSubject(text: string): string {
+  // Strip sent-email prefix
+  let s = text.replace(/^↗\s*/, "");
+  // Iteratively strip Re:/FW:/Fwd: prefixes (handles nested)
+  let prev = "";
+  while (s !== prev) {
+    prev = s;
+    s = s.replace(/^(re|fw|fwd):\s*/i, "");
+  }
+  return s.trim().toLowerCase();
+}
+
+export function groupContactFeedItems(items: TouchpointItem[]): GroupedFeedItem[] {
+  // Group email items by normalized subject, preserve non-email items as-is
+  const result: GroupedFeedItem[] = [];
+  const emailGroups = new Map<string, TouchpointItem[]>();
+  const emittedKeys = new Set<string>();
+
+  for (const item of items) {
+    if (item.ch !== "email") {
+      result.push({ type: "single", item });
+      continue;
+    }
+
+    const key = normalizeEmailSubject(item.text);
+    if (!emailGroups.has(key)) {
+      emailGroups.set(key, []);
+    }
+    emailGroups.get(key)!.push(item);
+
+    // Emit thread group at the position of the first (newest) email
+    if (!emittedKeys.has(key)) {
+      emittedKeys.add(key);
+      // Placeholder — we'll fill in count after collecting all emails
+      result.push({ type: "thread", key, items: [], count: 0 });
+    }
+  }
+
+  // Fill in thread groups with collected emails
+  for (const entry of result) {
+    if (entry.type === "thread") {
+      const emails = emailGroups.get(entry.key)!;
+      entry.items = emails;
+      entry.count = emails.length;
+    }
+  }
+
+  return result;
+}
+
 export function computeRelationshipStrength(detail: PersonDetailResponse): {
   score: number;
   label: string;

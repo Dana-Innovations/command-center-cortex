@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { usePeople } from "@/hooks/usePeople";
 import { useSalesforce } from "@/hooks/useSalesforce";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PersonDetailPanel } from "./PersonDetailPanel";
 import type { TouchpointItem } from "@/hooks/usePeople";
+import type { GroupedFeedItem } from "@/lib/people-utils";
 import { useAttention } from "@/lib/attention/client";
 import { getAttentionPersonRankingWeight } from "@/lib/attention/people";
 import type {
@@ -26,6 +27,7 @@ import {
   formatDaysAgo,
   computeHeat,
   matchesOpp,
+  groupContactFeedItems,
 } from "@/lib/people-utils";
 
 // ── Main Component ────────────────────────────────────────────────────────
@@ -374,6 +376,21 @@ function ContactCard({
   onToggle: () => void;
   onDeepDive: () => void;
 }) {
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
+  const toggleThread = useCallback((key: string) => {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const groupedItems = useMemo(
+    () => groupContactFeedItems(contact.items),
+    [contact.items]
+  );
+
   const teamsItems = contact.items.filter((i) => i.ch === "teams");
   const emailItems = contact.items.filter((i) => i.ch === "email");
   const meetingItems = contact.items.filter((i) => i.ch === "meeting");
@@ -517,44 +534,128 @@ function ContactCard({
       {/* Expanded touchpoints */}
       {isExpanded && (
         <div className="border-t border-[var(--bg-card-border)] divide-y divide-[var(--bg-card-border)]">
-          {contact.items.map((item, i) => (
-            <div key={i} className="px-4 py-2.5 flex items-start gap-2.5">
-              <span
-                className={cn(
-                  "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5",
-                  CH_COLORS[item.ch]
-                )}
-              >
-                {CH_ICONS[item.ch]} {item.ch}
-              </span>
-              <div className="min-w-0 flex-1">
-                {item.url && item.url !== "#" ? (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-text-body hover:text-accent-amber transition-colors line-clamp-2"
+          {groupedItems.map((entry, i) => {
+            if (entry.type === "single" || (entry.type === "thread" && entry.count === 1)) {
+              const item = entry.type === "single" ? entry.item : entry.items[0];
+              return (
+                <FeedItemRow key={i} item={item} />
+              );
+            }
+
+            // Thread with multiple emails
+            const latest = entry.items[0];
+            const isThreadExpanded = expandedThreads.has(entry.key);
+
+            return (
+              <div key={i}>
+                {/* Thread header row */}
+                <button
+                  className="w-full px-4 py-2.5 flex items-start gap-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                  onClick={() => toggleThread(entry.key)}
+                >
+                  <span
+                    className={cn(
+                      "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5",
+                      CH_COLORS.email
+                    )}
                   >
-                    {item.text}
-                  </a>
-                ) : (
-                  <div className="text-xs text-text-body line-clamp-2">
-                    {item.text}
+                    {CH_ICONS.email} email
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {latest.url && latest.url !== "#" ? (
+                        <a
+                          href={latest.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-text-body hover:text-accent-amber transition-colors line-clamp-1 flex-1"
+                        >
+                          {latest.text}
+                        </a>
+                      ) : (
+                        <div className="text-xs text-text-body line-clamp-1 flex-1">
+                          {latest.text}
+                        </div>
+                      )}
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-text-muted shrink-0">
+                        {entry.count} emails
+                      </span>
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className={cn(
+                          "shrink-0 text-text-muted transition-transform",
+                          isThreadExpanded && "rotate-180"
+                        )}
+                      >
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </div>
+                    {latest.preview && latest.preview !== latest.text && (
+                      <div className="text-[11px] text-text-muted mt-0.5 line-clamp-1">
+                        {latest.preview}
+                      </div>
+                    )}
                   </div>
-                )}
-                {item.preview && item.preview !== item.text && (
-                  <div className="text-[11px] text-text-muted mt-0.5 line-clamp-1">
-                    {item.preview}
+                  {latest.timestamp && (
+                    <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0 mt-0.5">
+                      {formatRelativeTime(latest.timestamp)}
+                    </span>
+                  )}
+                </button>
+
+                {/* Expanded thread children */}
+                {isThreadExpanded && (
+                  <div className="border-t border-[var(--bg-card-border)]/50">
+                    {entry.items.map((threadItem, ti) => (
+                      <div
+                        key={ti}
+                        className="pl-10 pr-4 py-2 flex items-start gap-2.5 bg-white/[0.01]"
+                      >
+                        <span className={cn(
+                          "text-[9px] px-1 py-0.5 rounded shrink-0 mt-0.5",
+                          threadItem.text.startsWith("\u2197") ? "text-accent-teal" : "text-accent-amber"
+                        )}>
+                          {threadItem.text.startsWith("\u2197") ? "\u2197" : "\u2199"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          {threadItem.url && threadItem.url !== "#" ? (
+                            <a
+                              href={threadItem.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-text-body/80 hover:text-accent-amber transition-colors line-clamp-1"
+                            >
+                              {threadItem.text}
+                            </a>
+                          ) : (
+                            <div className="text-[11px] text-text-body/80 line-clamp-1">
+                              {threadItem.text}
+                            </div>
+                          )}
+                          {threadItem.preview && threadItem.preview !== threadItem.text && (
+                            <div className="text-[10px] text-text-muted mt-0.5 line-clamp-1 opacity-70">
+                              {threadItem.preview}
+                            </div>
+                          )}
+                        </div>
+                        {threadItem.timestamp && (
+                          <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0 mt-0.5">
+                            {formatRelativeTime(threadItem.timestamp)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-              {item.timestamp && (
-                <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0 mt-0.5">
-                  {formatRelativeTime(item.timestamp)}
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
 
           {/* Quick actions */}
           <div className="px-4 py-2.5 flex gap-2">
@@ -584,6 +685,49 @@ function ContactCard({
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Feed Item Row (single touchpoint) ────────────────────────────────────
+
+function FeedItemRow({ item }: { item: TouchpointItem }) {
+  return (
+    <div className="px-4 py-2.5 flex items-start gap-2.5">
+      <span
+        className={cn(
+          "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5",
+          CH_COLORS[item.ch]
+        )}
+      >
+        {CH_ICONS[item.ch]} {item.ch}
+      </span>
+      <div className="min-w-0 flex-1">
+        {item.url && item.url !== "#" ? (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-text-body hover:text-accent-amber transition-colors line-clamp-2"
+          >
+            {item.text}
+          </a>
+        ) : (
+          <div className="text-xs text-text-body line-clamp-2">
+            {item.text}
+          </div>
+        )}
+        {item.preview && item.preview !== item.text && (
+          <div className="text-[11px] text-text-muted mt-0.5 line-clamp-1">
+            {item.preview}
+          </div>
+        )}
+      </div>
+      {item.timestamp && (
+        <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0 mt-0.5">
+          {formatRelativeTime(item.timestamp)}
+        </span>
       )}
     </div>
   );
