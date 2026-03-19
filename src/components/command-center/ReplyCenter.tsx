@@ -1556,35 +1556,41 @@ export function ReplyCenter() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <AttentionFeedbackControl
               target={item.attentionTarget}
               surface="reply-center"
               compact
+              showLabel
             />
-            {item.url && (
-              <a
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
+            <div className="h-5 w-px bg-[var(--bg-card-border)]" />
+            <div className="flex flex-wrap gap-2">
+              {item.url && (
+                <a
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open in Asana
+                  <ExternalLinkIcon size={11} />
+                </a>
+              )}
+              <button
+                className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                title="Open AI-assisted reply draft"
+                onClick={() => setComposerState({ itemId: item.id, mode: "draft" })}
               >
-                Open in Asana
-                <ExternalLinkIcon size={11} />
-              </a>
-            )}
-            <button
-              className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-              onClick={() => setComposerState({ itemId: item.id, mode: "draft" })}
-            >
-              Comment
-            </button>
-            <button
-              className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-              onClick={() => setComposerState({ itemId: item.id, mode: "ai" })}
-            >
-              AI assist
-            </button>
+                Comment
+              </button>
+              <button
+                className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                title="Get AI suggestions for this message"
+                onClick={() => setComposerState({ itemId: item.id, mode: "ai" })}
+              >
+                AI assist
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1717,12 +1723,14 @@ export function ReplyCenter() {
           <div className="flex flex-wrap gap-2 border-t border-[var(--bg-card-border)] pt-1">
             <button
               className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+              title="Remind me about this later"
               onClick={() => snoozeItem(item.id)}
             >
               Snooze
             </button>
             <button
               className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
+              title="Remove from priority queue"
               onClick={() => dismissItem(item.id)}
             >
               Dismiss
@@ -2080,89 +2088,104 @@ export function ReplyCenter() {
                           </div>
 
                           {item.source === "asana_comment" ? (
-                            <div className="flex flex-wrap gap-2 lg:w-[320px] lg:justify-end">
+                            <div className="flex flex-wrap items-center gap-3 lg:w-[380px] lg:justify-end">
                               <AttentionFeedbackControl
                                 target={item.attentionTarget}
                                 surface="reply-center"
                                 compact
+                                showLabel
                               />
-                              <button
-                                className="rounded-md bg-accent-amber px-3 py-1.5 text-[11px] font-semibold text-[#0d0d0d] transition-colors hover:bg-accent-amber/90"
-                                onClick={() => openAsanaInspector(item, "draft")}
-                              >
-                                Comment
-                              </button>
-                              <button
-                                className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                onClick={() => openAsanaInspector(item, "ai")}
-                              >
-                                AI assist
-                              </button>
-                              {item.url && (
-                                <a
-                                  className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  Open in Asana
-                                  <ExternalLinkIcon size={11} />
-                                </a>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-2 lg:w-[320px] lg:justify-end">
-                              <AttentionFeedbackControl
-                                target={item.attentionTarget}
-                                surface="reply-center"
-                                compact
-                              />
-                              {item.source !== "slack_context" && (
+                              <div className="h-5 w-px bg-[var(--bg-card-border)]" />
+                              <div className="flex flex-wrap gap-2">
                                 <button
-                                  className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                  onClick={() => openComposer(item, "draft")}
+                                  className="rounded-md bg-accent-amber px-3 py-1.5 text-[11px] font-semibold text-[#0d0d0d] transition-colors hover:bg-accent-amber/90"
+                                  title="Open AI-assisted reply draft"
+                                  onClick={() => openAsanaInspector(item, "draft")}
                                 >
-                                  Draft
+                                  Comment
                                 </button>
-                              )}
-                              {item.source === "slack_context" ? (
                                 <button
                                   className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                  onClick={() => toggleExpanded(item)}
-                                >
-                                  Summarize context
-                                </button>
-                              ) : (
-                                <button
-                                  className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                  onClick={() => openComposer(item, "ai")}
+                                  title="Get AI suggestions for this message"
+                                  onClick={() => openAsanaInspector(item, "ai")}
                                 >
                                   AI assist
                                 </button>
-                              )}
-                              {item.url && item.source !== "email" && (
-                                <a
-                                  className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                {item.url && (
+                                  <a
+                                    className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    Open in Asana
+                                    <ExternalLinkIcon size={11} />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-3 lg:w-[380px] lg:justify-end">
+                              <AttentionFeedbackControl
+                                target={item.attentionTarget}
+                                surface="reply-center"
+                                compact
+                                showLabel
+                              />
+                              <div className="h-5 w-px bg-[var(--bg-card-border)]" />
+                              <div className="flex flex-wrap gap-2">
+                                {item.source !== "slack_context" && (
+                                  <button
+                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    title="Open AI-assisted reply draft"
+                                    onClick={() => openComposer(item, "draft")}
+                                  >
+                                    Draft
+                                  </button>
+                                )}
+                                {item.source === "slack_context" ? (
+                                  <button
+                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    title="Get AI suggestions for this message"
+                                    onClick={() => toggleExpanded(item)}
+                                  >
+                                    Summarize context
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    title="Get AI suggestions for this message"
+                                    onClick={() => openComposer(item, "ai")}
+                                  >
+                                    AI assist
+                                  </button>
+                                )}
+                                {item.url && item.source !== "email" && (
+                                  <a
+                                    className="inline-flex items-center gap-1 rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    {handoffLabel(item, Boolean(drafts[item.id]?.trim()))}
+                                    <ExternalLinkIcon size={11} />
+                                  </a>
+                                )}
+                                <button
+                                  className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                  title="Remind me about this later"
+                                  onClick={() => isThreaded ? snoozeThread(thread) : snoozeItem(item.id)}
                                 >
-                                  {handoffLabel(item, Boolean(drafts[item.id]?.trim()))}
-                                  <ExternalLinkIcon size={11} />
-                                </a>
-                              )}
-                              <button
-                                className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
-                                onClick={() => isThreaded ? snoozeThread(thread) : snoozeItem(item.id)}
-                              >
-                                Snooze
-                              </button>
-                              <button
-                                className="rounded-md px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
-                                onClick={() => isThreaded ? dismissThread(thread) : dismissItem(item.id)}
-                              >
-                                Dismiss
-                              </button>
+                                  Snooze
+                                </button>
+                                <button
+                                  className="rounded-md px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
+                                  title="Remove from priority queue"
+                                  onClick={() => isThreaded ? dismissThread(thread) : dismissItem(item.id)}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
