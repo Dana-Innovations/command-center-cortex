@@ -68,7 +68,7 @@ export function AttentionFeedbackControl({
               }
             }}
             className={cn(
-              "rounded-xl px-2.5 py-1 transition-colors",
+              "relative group rounded-xl px-2.5 py-1 transition-colors",
               active
                 ? option.value === "raise"
                   ? "bg-accent-green/15 text-accent-green"
@@ -80,6 +80,9 @@ export function AttentionFeedbackControl({
             title={option.tooltip}
           >
             {busy ? "..." : compact ? option.short : option.label}
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              {option.tooltip}
+            </span>
           </button>
         );
       })}

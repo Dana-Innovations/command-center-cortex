@@ -1577,18 +1577,20 @@ export function ReplyCenter() {
                 </a>
               )}
               <button
-                className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                className="relative group rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                 title="Open AI-assisted reply draft"
                 onClick={() => setComposerState({ itemId: item.id, mode: "draft" })}
               >
                 Comment
+                <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Open AI-assisted reply draft</span>
               </button>
               <button
-                className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                className="relative group rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                 title="Get AI suggestions for this message"
                 onClick={() => setComposerState({ itemId: item.id, mode: "ai" })}
               >
                 AI assist
+                <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Get AI suggestions for this message</span>
               </button>
             </div>
           </div>
@@ -1722,18 +1724,20 @@ export function ReplyCenter() {
 
           <div className="flex flex-wrap gap-2 border-t border-[var(--bg-card-border)] pt-1">
             <button
-              className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+              className="relative group rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
               title="Remind me about this later"
               onClick={() => snoozeItem(item.id)}
             >
               Snooze
+              <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Remind me about this later</span>
             </button>
             <button
-              className="rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
+              className="relative group rounded-md border border-[var(--bg-card-border)] px-3 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
               title="Remove from priority queue"
               onClick={() => dismissItem(item.id)}
             >
               Dismiss
+              <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Remove from priority queue</span>
             </button>
           </div>
         </div>
@@ -2098,18 +2102,20 @@ export function ReplyCenter() {
                               <div className="h-5 w-px bg-[var(--bg-card-border)]" />
                               <div className="flex flex-wrap gap-2">
                                 <button
-                                  className="rounded-md bg-accent-amber px-3 py-1.5 text-[11px] font-semibold text-[#0d0d0d] transition-colors hover:bg-accent-amber/90"
+                                  className="relative group rounded-md bg-accent-amber px-3 py-1.5 text-[11px] font-semibold text-[#0d0d0d] transition-colors hover:bg-accent-amber/90"
                                   title="Open AI-assisted reply draft"
                                   onClick={() => openAsanaInspector(item, "draft")}
                                 >
                                   Comment
+                                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Open AI-assisted reply draft</span>
                                 </button>
                                 <button
-                                  className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                  className="relative group rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                                   title="Get AI suggestions for this message"
                                   onClick={() => openAsanaInspector(item, "ai")}
                                 >
                                   AI assist
+                                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Get AI suggestions for this message</span>
                                 </button>
                                 {item.url && (
                                   <a
@@ -2136,28 +2142,31 @@ export function ReplyCenter() {
                               <div className="flex flex-wrap gap-2">
                                 {item.source !== "slack_context" && (
                                   <button
-                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    className="relative group rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                                     title="Open AI-assisted reply draft"
                                     onClick={() => openComposer(item, "draft")}
                                   >
                                     Draft
+                                    <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Open AI-assisted reply draft</span>
                                   </button>
                                 )}
                                 {item.source === "slack_context" ? (
                                   <button
-                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    className="relative group rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                                     title="Get AI suggestions for this message"
                                     onClick={() => toggleExpanded(item)}
                                   >
                                     Summarize context
+                                    <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Get AI suggestions for this message</span>
                                   </button>
                                 ) : (
                                   <button
-                                    className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                    className="relative group rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                                     title="Get AI suggestions for this message"
                                     onClick={() => openComposer(item, "ai")}
                                   >
                                     AI assist
+                                    <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Get AI suggestions for this message</span>
                                   </button>
                                 )}
                                 {item.url && item.source !== "email" && (
@@ -2172,18 +2181,20 @@ export function ReplyCenter() {
                                   </a>
                                 )}
                                 <button
-                                  className="rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
+                                  className="relative group rounded-md border border-[var(--bg-card-border)] px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-text-body"
                                   title="Remind me about this later"
                                   onClick={() => isThreaded ? snoozeThread(thread) : snoozeItem(item.id)}
                                 >
                                   Snooze
+                                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Remind me about this later</span>
                                 </button>
                                 <button
-                                  className="rounded-md px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
+                                  className="relative group rounded-md px-2.5 py-1.5 text-[11px] text-text-muted transition-colors hover:text-accent-red"
                                   title="Remove from priority queue"
                                   onClick={() => isThreaded ? dismissThread(thread) : dismissItem(item.id)}
                                 >
                                   Dismiss
+                                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] rounded bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Remove from priority queue</span>
                                 </button>
                               </div>
                             </div>
