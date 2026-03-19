@@ -164,7 +164,7 @@ interface DayBucket {
 
 export function CalendarView() {
   const { events: calEvents } = useCalendar();
-  const meetingPrep = transformMeetingPrep(calEvents);
+  const meetingPrep = useMemo(() => transformMeetingPrep(calEvents), [calEvents]);
 
   const [now, setNow] = useState(nowPST);
   useEffect(() => {
