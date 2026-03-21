@@ -211,6 +211,102 @@ body {
 .pb-safe { padding-bottom: var(--safe-bottom); }
 .mb-safe { margin-bottom: var(--safe-bottom); }
 
+/* ============================================
+   SKELETON & LOADING SYSTEM
+   ============================================ */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Skeleton → content reveal */
+@keyframes skeletonReveal {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+.skeleton-fade-in {
+  animation: skeletonReveal 0.35s ease-out forwards;
+}
+
+/* ============================================
+   COLLAPSIBLE SECTIONS
+   ============================================ */
+
+.collapsible-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.35s ease, opacity 0.25s ease;
+}
+.collapsible-body.expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapsible-body > .collapsible-inner {
+  overflow: hidden;
+}
+
+/* ============================================
+   TYPOGRAPHY SCALE
+   ============================================ */
+
+.type-display { font-size: 1.25rem; font-weight: 600; color: var(--text-heading); line-height: 1.3; }
+.type-title { font-size: 1.125rem; font-weight: 600; color: var(--text-heading); line-height: 1.35; }
+.type-subtitle { font-size: 1rem; font-weight: 500; color: var(--text-heading); line-height: 1.4; }
+.type-body { font-size: 0.875rem; line-height: 1.65; color: var(--text-body); }
+.type-caption { font-size: 0.75rem; color: var(--text-muted); }
+.type-micro { font-size: 0.6875rem; color: var(--text-muted); }
+.type-eyebrow { font-size: 0.625rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2em; }
+
+/* ============================================
+   SPACING & ANIMATION TOKENS
+   ============================================ */
+
+:root {
+  --space-card: 1.5rem;
+  --space-card-sm: 1rem;
+  --space-section: 1.25rem;
+  --space-inline: 0.5rem;
+  --space-stack: 0.75rem;
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-default: ease;
+}
+
+/* ============================================
+   COLOR ALIASES (new semantic names)
+   Old names kept as aliases for migration
+   ============================================ */
+
+:root {
+  --accent-blue: #00A3E1;
+  --accent-blue-dim: rgba(0, 163, 225, 0.15);
+  --accent-teal-true: #00B2A9;
+  --accent-teal-bright: #00D4C8;
+  --accent-muted: #8899A6;
+  --brand-blue: #00A3E1;
+  --brand-teal: #00B2A9;
+}
+
+/* Global progress bar */
+@keyframes progressIndeterminate {
+  0% { width: 0%; }
+  50% { width: 85%; }
+  100% { width: 85%; }
+}
+
 /* Print */
 @media print {
   .grain-overlay, .tab-bar, .header-controls, .main-footer { display: none !important; }

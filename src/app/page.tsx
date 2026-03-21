@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
 import { TabBar } from "@/components/layout/TabBar";
+import { GlobalProgressBar } from "@/components/ui/GlobalProgressBar";
 import { EODSummary } from "@/components/modals/EODSummary";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { CalendarHubView } from "@/components/views/CalendarHubView";
@@ -14,6 +15,7 @@ import { OperationsView } from "@/components/views/OperationsView";
 import { PerformanceView } from "@/components/views/PerformanceView";
 import { PeopleHubView } from "@/components/views/PeopleHubView";
 import { SetupFocusView } from "@/components/ui/WorkspaceStudio";
+import { useTabBadges } from "@/hooks/useTabBadges";
 import { AttentionProvider, useAttention } from "@/lib/attention/client";
 import { LiveDataProvider, useLiveData } from "@/lib/live-data-context";
 import {
@@ -46,7 +48,22 @@ export default function Home() {
 function HomeShellFallback() {
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] px-4 py-8 md:px-6">
-      <div className="glass-card anim-card h-36 animate-pulse" />
+      <GlobalProgressBar isActive />
+      <div className="space-y-4">
+        <div className="glass-card anim-card">
+          <div className="skeleton-shimmer h-4 w-36 rounded-full" />
+          <div className="skeleton-shimmer mt-3 h-8 w-3/4 rounded-lg" />
+          <div className="skeleton-shimmer mt-2 h-4 w-2/3 rounded-lg" />
+        </div>
+        <div className="flex gap-3">
+          <div className="skeleton-shimmer h-9 w-28 rounded-full" />
+          <div className="skeleton-shimmer h-9 w-24 rounded-full" />
+        </div>
+        <div className="glass-card anim-card" style={{ animationDelay: "60ms" }}>
+          <div className="skeleton-shimmer h-5 w-48 rounded-lg" />
+          <div className="skeleton-shimmer mt-2 h-3 w-72 rounded-lg" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -62,6 +79,7 @@ function HomeContent() {
   >(null);
   const { loading, fetchedAt, error, refetch } = useLiveData();
   const { focusRevision, openSetupFocus, connectService } = useAttention();
+  const badges = useTabBadges();
   const activeTab: TabId = parseTabId(searchParams.get("tab"));
   const homeSubView: HomeSubView = parseHomeSubView(searchParams.get("sub"));
   const calendarSubView: CalendarSubView = parseCalendarSubView(
@@ -332,6 +350,7 @@ function HomeContent() {
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
       <div className="grain-overlay" aria-hidden="true" />
+      <GlobalProgressBar isActive={loading} />
 
       <Header
         onRefresh={refetch}
@@ -342,7 +361,7 @@ function HomeContent() {
         onOpenSetup={() => openSetup("focus")}
       />
 
-      <TabBar activeTab={activeTab} onTabChange={navigateToTab} className="mb-5" />
+      <TabBar activeTab={activeTab} onTabChange={navigateToTab} badges={badges} className="mb-5" />
 
       <main className="px-4 pb-24 md:px-6 md:pb-8">{currentView}</main>
 

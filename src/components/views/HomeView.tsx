@@ -1,170 +1,24 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { AttentionFeedbackControl } from "@/components/ui/AttentionFeedbackControl";
-import { useAsanaComments } from "@/hooks/useAsanaComments";
-import { useCalendar } from "@/hooks/useCalendar";
-import { useChats } from "@/hooks/useChats";
-import { useEmails } from "@/hooks/useEmails";
-import { useMonday } from "@/hooks/useMonday";
-import { usePeople } from "@/hooks/usePeople";
-import { useSalesforce } from "@/hooks/useSalesforce";
-import { useSlackFeed } from "@/hooks/useSlackFeed";
-import { useTasks } from "@/hooks/useTasks";
 import { MorningBrief } from "@/components/command-center/MorningBrief";
-import {
-  buildAsanaCommentAttentionTarget,
-  buildCalendarAttentionTarget,
-  buildEmailAttentionTarget,
-  buildSlackAttentionTarget,
-  buildTaskAttentionTarget,
-  buildTeamsChatAttentionTarget,
-} from "@/lib/attention/targets";
-import { type SetupFocusTab, type TabId } from "@/lib/tab-config";
-import { useAttention } from "@/lib/attention/client";
-import { getAttentionPersonRankingWeight } from "@/lib/attention/people";
-import { cn } from "@/lib/utils";
+import { AttentionHero } from "@/components/home/AttentionHero";
+import { QuickActions } from "@/components/home/QuickActions";
+import { HomeCommunications } from "@/components/home/HomeCommunications";
+import { HomeCalendar } from "@/components/home/HomeCalendar";
+import { HomeTasks } from "@/components/home/HomeTasks";
+import { HomePeople } from "@/components/home/HomePeople";
+import { HomeWatchlist } from "@/components/home/HomeWatchlist";
+import { useHomeData, type QuickAction } from "@/components/home/useHomeData";
+import type { SetupFocusTab, TabId } from "@/lib/tab-config";
 
-type CommunicationCardItem =
-  | {
-      id: string;
-      kind: "email";
-      title: string;
-      meta: string;
-      preview: string;
-      url: string;
-      attentionTarget: ReturnType<typeof buildEmailAttentionTarget>;
-      score: number;
-      timestamp: number;
-    }
-  | {
-      id: string;
-      kind: "chat";
-      title: string;
-      meta: string;
-      preview: string;
-      url?: string;
-      attentionTarget: ReturnType<typeof buildTeamsChatAttentionTarget>;
-      score: number;
-      timestamp: number;
-    }
-  | {
-      id: string;
-      kind: "slack";
-      title: string;
-      meta: string;
-      preview: string;
-      url?: string | null;
-      attentionTarget: ReturnType<typeof buildSlackAttentionTarget>;
-      score: number;
-      timestamp: number;
-    }
-  | {
-      id: string;
-      kind: "asana";
-      title: string;
-      meta: string;
-      preview: string;
-      url: string;
-      attentionTarget: ReturnType<typeof buildAsanaCommentAttentionTarget>;
-      score: number;
-      timestamp: number;
-    };
-
-const urgencyOrder = { red: 0, amber: 1, teal: 2, gray: 3 };
 const M365_WIN_CARDS = [
-  {
-    title: "Morning brief",
-    description: "AI summary from your live email, meetings, and work.",
-  },
-  {
-    title: "Ranked replies",
-    description: "The most important threads rise first from your own inbox.",
-  },
-  {
-    title: "Calendar prep",
-    description: "Meeting context and next actions before the day gets busy.",
-  },
-  {
-    title: "Teams context",
-    description: "Chats and channel signals alongside the rest of your day.",
-  },
+  { title: "Morning brief", description: "AI summary from your live email, meetings, and work." },
+  { title: "Ranked replies", description: "The most important threads rise first from your own inbox." },
+  { title: "Calendar prep", description: "Meeting context and next actions before the day gets busy." },
+  { title: "Teams context", description: "Chats and channel signals alongside the rest of your day." },
 ] as const;
-
-function getPreferredLiveTab(
-  connectedServices: Array<{ provider: string }>
-): { tab: TabId; label: string } | null {
-  for (const service of connectedServices) {
-    if (service.provider === "asana" || service.provider === "monday") {
-      return { tab: "operations", label: "Open Operations" };
-    }
-
-    if (service.provider === "slack") {
-      return { tab: "communications", label: "Open Comms" };
-    }
-
-    if (service.provider === "salesforce" || service.provider === "powerbi") {
-      return { tab: "performance", label: "Open Performance" };
-    }
-  }
-
-  return null;
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "America/Los_Angeles",
-  });
-}
-
-function formatDay(value: string) {
-  return new Date(value).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    timeZone: "America/Los_Angeles",
-  });
-}
-
-function daysUntil(value: string | null | undefined) {
-  if (!value) return null;
-  const today = new Date();
-  const target = new Date(value);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
-}
-
-function orderNeedsAttention(status: string) {
-  const upper = status.toUpperCase();
-  return (
-    upper.includes("DWG NEEDED") ||
-    upper.includes("BONITA PO NEEDED") ||
-    upper.includes("SALES ORDER NEEDED")
-  );
-}
-
-function SectionHeader({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h2 className="text-lg font-semibold text-text-heading">{title}</h2>
-        <p className="mt-1 text-sm text-text-muted">{description}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
 
 interface HomeViewProps {
   onNavigate: (tab: TabId) => void;
@@ -183,253 +37,60 @@ export function HomeView({
   recentlyConnectedProvider = null,
   isSyncingLiveData = false,
 }: HomeViewProps) {
-  const { emails } = useEmails();
-  const { chats } = useChats();
-  const { comments } = useAsanaComments();
-  const { messages: slackMessages } = useSlackFeed();
-  const { events } = useCalendar();
-  const { tasks } = useTasks();
-  const { people } = usePeople();
-  const { openOpps } = useSalesforce();
-  const { orders, connected: mondayConnected } = useMonday();
-  const {
-    services,
-    connectingService,
-    applyTarget,
-    getPersonPreference,
-  } = useAttention();
+  const data = useHomeData();
 
-  const connectedServices = services.filter((service) => service.connected);
-  const connectedServiceLabels = connectedServices.map((service) => service.label);
-  const hasAnyService = connectedServices.length > 0;
-  const hasM365 = connectedServices.some(
-    (service) => service.provider === "microsoft"
+  const handleQuickAction = useCallback(
+    (action: QuickAction) => {
+      switch (action.handler) {
+        case "navigate":
+          onNavigate(action.payload as TabId);
+          break;
+        case "external":
+          window.open(action.payload, "_blank", "noopener,noreferrer");
+          break;
+        case "calendarPrep":
+          onOpenCalendarPrep(action.payload);
+          break;
+        case "setup":
+          onOpenSetup(action.payload as SetupFocusTab);
+          break;
+      }
+    },
+    [onNavigate, onOpenCalendarPrep, onOpenSetup]
   );
-  const preferredLiveTab = getPreferredLiveTab(connectedServices);
 
-  const todayEvents = useMemo(() => {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles",
-    });
-
-    return [...events]
-      .filter((event) => {
-        const start = new Date(event.start_time).toLocaleDateString("en-CA", {
-          timeZone: "America/Los_Angeles",
-        });
-        return start === today;
-      })
-      .map((event) => {
-        const attentionTarget = buildCalendarAttentionTarget(
-          event,
-          "home",
-          event.is_all_day ? 52 : 62
-        );
-        const attention = applyTarget(attentionTarget);
-        return { event, attention, attentionTarget };
-      })
-      .filter((item) => !item.attention.hidden)
-      .sort(
-        (a, b) =>
-          b.attention.finalScore - a.attention.finalScore ||
-          new Date(a.event.start_time).getTime() - new Date(b.event.start_time).getTime()
-      )
-      .slice(0, 4);
-  }, [applyTarget, events]);
-
-  const priorityTasks = useMemo(() => {
-    return [...tasks]
-      .filter((task) => !task.completed)
-      .map((task) => {
-        const dueDelta = daysUntil(task.due_on);
-        const baseScore =
-          task.days_overdue > 0 ? 72 : dueDelta !== null && dueDelta <= 2 ? 62 : 50;
-        const attentionTarget = buildTaskAttentionTarget(task, "home", baseScore);
-        const attention = applyTarget(attentionTarget);
-        return { task, attention, attentionTarget };
-      })
-      .filter((item) => !item.attention.hidden)
-      .sort((a, b) => {
-        if (a.task.days_overdue !== b.task.days_overdue) {
-          return b.task.days_overdue - a.task.days_overdue;
-        }
-        return b.attention.finalScore - a.attention.finalScore;
-      })
-      .slice(0, 5);
-  }, [applyTarget, tasks]);
-
-  const peopleToWatch = useMemo(() => {
-    return [...people]
-      .sort((a, b) => {
-        const preferenceDelta =
-          getAttentionPersonRankingWeight(
-            getPersonPreference({ name: b.name, email: b.email ?? null })
-          ) -
-          getAttentionPersonRankingWeight(
-            getPersonPreference({ name: a.name, email: a.email ?? null })
-          );
-        if (preferenceDelta !== 0) return preferenceDelta;
-        const urgencyDelta = urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
-        if (urgencyDelta !== 0) return urgencyDelta;
-        return b.touchpoints - a.touchpoints;
-      })
-      .slice(0, 5);
-  }, [getPersonPreference, people]);
-
-  const performanceWatchlist = useMemo(() => {
-    return openOpps
-      .filter(
-        (opp) =>
-          opp.days_to_close <= 14 ||
-          (opp.days_in_stage != null && opp.days_in_stage > 30) ||
-          opp.has_overdue_task
-      )
-      .sort((a, b) => a.days_to_close - b.days_to_close)
-      .slice(0, 3);
-  }, [openOpps]);
-
-  const operationsWatchlist = useMemo(() => {
-    if (!mondayConnected) return [];
-    return orders.filter((order) => orderNeedsAttention(order.status)).slice(0, 3);
-  }, [mondayConnected, orders]);
-
-  const communicationItems = useMemo<CommunicationCardItem[]>(() => {
-    const next: CommunicationCardItem[] = [];
-
-    emails
-      .filter((email) => email.needs_reply)
-      .slice(0, 8)
-      .forEach((email) => {
-        const attentionTarget = buildEmailAttentionTarget(email, "home", 70);
-        const attention = applyTarget(attentionTarget);
-        if (attention.hidden) return;
-        next.push({
-          id: `email-${email.id}`,
-          kind: "email",
-          title: email.subject || "(no subject)",
-          meta: `${email.from_name || email.from_email} · ${formatDay(email.received_at)}`,
-          preview: email.preview,
-          url: email.outlook_url,
-          attentionTarget,
-          score: attention.finalScore,
-          timestamp: new Date(email.received_at).getTime(),
-        });
-      });
-
-    chats.slice(0, 6).forEach((chat) => {
-      const attentionTarget = buildTeamsChatAttentionTarget(chat, "home", 56);
-      const attention = applyTarget(attentionTarget);
-      if (attention.hidden) return;
-      next.push({
-        id: `chat-${chat.id}`,
-        kind: "chat",
-        title: chat.topic || "Teams Chat",
-        meta: `${chat.last_message_from || "Teams"} · ${formatDay(chat.last_activity)}`,
-        preview: chat.last_message_preview,
-        url: chat.web_url,
-        attentionTarget,
-        score: attention.finalScore,
-        timestamp: new Date(chat.last_activity).getTime(),
-      });
-    });
-
-    slackMessages.slice(0, 6).forEach((message) => {
-      const attentionTarget = buildSlackAttentionTarget(message, "home", 54);
-      const attention = applyTarget(attentionTarget);
-      if (attention.hidden) return;
-      next.push({
-        id: `slack-${message.id}`,
-        kind: "slack",
-        title: `#${message.channel_name}`,
-        meta: `${message.author_name} · ${formatDay(message.timestamp)}`,
-        preview: message.text || "Slack activity",
-        url: message.permalink,
-        attentionTarget,
-        score: attention.finalScore,
-        timestamp: new Date(message.timestamp).getTime(),
-      });
-    });
-
-    comments.slice(0, 6).forEach((comment) => {
-      const attentionTarget = buildAsanaCommentAttentionTarget(comment, "home", 58);
-      const attention = applyTarget(attentionTarget);
-      if (attention.hidden) return;
-      next.push({
-        id: `asana-${comment.id}`,
-        kind: "asana",
-        title: comment.task_name,
-        meta: `${comment.latest_commenter_name} · ${formatDay(comment.latest_comment_at)}`,
-        preview: comment.latest_comment_text,
-        url: comment.permalink_url,
-        attentionTarget,
-        score: attention.finalScore,
-        timestamp: new Date(comment.latest_comment_at).getTime(),
-      });
-    });
-
-    return next
-      .sort((a, b) => b.score - a.score || b.timestamp - a.timestamp)
-      .slice(0, 6);
-  }, [applyTarget, chats, comments, emails, slackMessages]);
-
-  const homeStats = [
-    { label: "Connected", value: connectedServices.length },
-    { label: "Replies", value: emails.filter((email) => email.needs_reply).length },
-    { label: "Meetings today", value: todayEvents.length },
-    { label: "Priority tasks", value: priorityTasks.length },
-  ];
-
-  if (!hasAnyService) {
+  /* ── No services connected — onboarding state ── */
+  if (!data.hasAnyService) {
     return (
       <div className="space-y-5">
-        <section
-          className="glass-card anim-card overflow-hidden"
-          style={{ animationDelay: "0ms" }}
-        >
+        <section className="glass-card anim-card overflow-hidden" style={{ animationDelay: "0ms" }}>
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,163,225,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(0,178,169,0.12),transparent_32%)]" />
           <div className="relative grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.28em] text-accent-amber">
-                Real-Data Start
-              </div>
+              <div className="type-eyebrow text-accent-amber">Real-Data Start</div>
               <h1 className="mt-3 font-display text-3xl font-semibold leading-tight text-text-heading">
                 Connect Microsoft 365 to light up your command center.
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-muted">
-                It is the fastest way to unlock a live morning brief, ranked
-                replies, calendar prep, and Teams context from your own account.
-                Nothing here is mocked or prefilled.
+                It is the fastest way to unlock a live morning brief, ranked replies, calendar prep, and Teams context from your own account. Nothing here is mocked or prefilled.
               </p>
-
               <div className="mt-5">
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={connectingService === "microsoft"}
+                  disabled={data.connectingService === "microsoft"}
                   onClick={() => void onConnectService("microsoft")}
                 >
-                  {connectingService === "microsoft"
-                    ? "Connecting Microsoft 365..."
-                    : "Connect Microsoft 365"}
+                  {data.connectingService === "microsoft" ? "Connecting Microsoft 365..." : "Connect Microsoft 365"}
                 </Button>
               </div>
             </div>
-
             <div className="grid gap-3 sm:grid-cols-2">
               {M365_WIN_CARDS.map((card) => (
-                <div
-                  key={card.title}
-                  className="rounded-[22px] border border-[var(--bg-card-border)] bg-black/10 p-4"
-                >
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-accent-teal">
-                    Unlocks
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-text-heading">
-                    {card.title}
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-text-muted">
-                    {card.description}
-                  </p>
+                <div key={card.title} className="rounded-[22px] border border-[var(--bg-card-border)] bg-black/10 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.22em] text-accent-teal">Unlocks</div>
+                  <div className="mt-2 text-lg font-semibold text-text-heading">{card.title}</div>
+                  <p className="mt-2 text-sm leading-relaxed text-text-muted">{card.description}</p>
                 </div>
               ))}
             </div>
@@ -439,450 +100,57 @@ export function HomeView({
     );
   }
 
+  /* ── Connected state — attention-focused dashboard ── */
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* 1. Attention Hero — top 1-3 urgent items */}
+      <AttentionHero items={data.heroItems} onAction={handleQuickAction} />
+
+      {/* 2. Quick action buttons */}
+      <QuickActions actions={data.quickActions} onAction={handleQuickAction} />
+
+      {/* 3. Morning Brief (collapsed by default) */}
       <MorningBrief
         onOpenCalendarPrep={onOpenCalendarPrep}
-        showPendingState={
-          recentlyConnectedProvider === "microsoft" && isSyncingLiveData
-        }
+        showPendingState={recentlyConnectedProvider === "microsoft" && isSyncingLiveData}
       />
 
-      <section className="glass-card anim-card overflow-hidden" style={{ animationDelay: "0ms" }}>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,163,225,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(0,178,169,0.12),transparent_32%)]" />
-        <div className="relative grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.28em] text-accent-amber">
-              {hasM365 ? "Command Center" : "Next Best Connection"}
-            </div>
-            <h1 className="mt-3 font-display text-3xl font-semibold leading-tight text-text-heading">
-              {hasM365
-                ? "Start with the highest-signal work from today."
-                : "You already have live data here. Connect Microsoft 365 next for the biggest lift."}
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-muted">
-              {hasM365
-                ? "Your brief, communications, and calendar can lead the day now. Personalization is available when you want it, not before."
-                : "Microsoft 365 adds the morning brief, ranked replies, calendar prep, and Teams context on top of the real signals you already connected."}
-            </p>
+      {/* 4. Collapsible sections — progressive disclosure */}
+      <HomeCalendar
+        events={data.todayEvents}
+        heroItemIds={data.heroItemIds}
+        onNavigate={onNavigate}
+        onOpenCalendarPrep={onOpenCalendarPrep}
+        animDelay={160}
+      />
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {connectedServiceLabels.map((label) => (
-                <span
-                  key={label}
-                  className="rounded-full border border-[var(--bg-card-border)] bg-white/[0.04] px-3 py-1 text-[11px] text-text-body"
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
+      <HomeCommunications
+        items={data.communicationItems}
+        heroItemIds={data.heroItemIds}
+        onNavigate={onNavigate}
+        animDelay={200}
+      />
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {hasM365 ? (
-                <>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => onNavigate("communications")}
-                  >
-                    Open Comms
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onNavigate("calendar")}
-                  >
-                    View Calendar
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenSetup("focus")}
-                  >
-                    Personalize
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={connectingService === "microsoft"}
-                    onClick={() => void onConnectService("microsoft")}
-                  >
-                    {connectingService === "microsoft"
-                      ? "Connecting Microsoft 365..."
-                      : "Connect Microsoft 365"}
-                  </Button>
-                  {preferredLiveTab && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => onNavigate(preferredLiveTab.tab)}
-                    >
-                      {preferredLiveTab.label}
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenSetup("focus")}
-                  >
-                    Personalize
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
+      <HomeTasks
+        tasks={data.priorityTasks}
+        heroItemIds={data.heroItemIds}
+        onNavigate={onNavigate}
+        animDelay={240}
+      />
 
-          {hasM365 ? (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-              {homeStats.map((stat) => (
-                <div
-                  key={stat.label}
-                  className="rounded-[22px] border border-[var(--bg-card-border)] bg-black/10 p-4"
-                >
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
-                    {stat.label}
-                  </div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-text-heading">
-                    {stat.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-              {M365_WIN_CARDS.map((card) => (
-                <div
-                  key={card.title}
-                  className="rounded-[22px] border border-[var(--bg-card-border)] bg-black/10 p-4"
-                >
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-accent-teal">
-                    Next unlock
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-text-heading">
-                    {card.title}
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-text-muted">
-                    {card.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
+      <HomePeople
+        people={data.peopleToWatch}
+        getPersonPreference={data.getPersonPreference}
+        onNavigate={onNavigate}
+        animDelay={280}
+      />
 
-      <section className="glass-card anim-card" style={{ animationDelay: "80ms" }}>
-        <SectionHeader
-          title="Communications Now"
-          description="One high-level sweep of the threads, chats, comments, and channels most likely to need you next."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => onNavigate("communications")}>
-              View all in Comms
-            </Button>
-          }
-        />
-        {communicationItems.length === 0 ? (
-          <p className="text-sm text-text-muted">No communications are rising right now.</p>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {communicationItems.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full border border-[var(--bg-card-border)] bg-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-text-muted">
-                        {item.kind}
-                      </span>
-                      <span className="text-[11px] text-text-muted">{item.meta}</span>
-                    </div>
-                    <p className="mt-2 text-sm font-medium text-text-heading">
-                      {item.title}
-                    </p>
-                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-muted">
-                      {item.preview}
-                    </p>
-                  </div>
-                  <AttentionFeedbackControl
-                    target={item.attentionTarget}
-                    surface="home"
-                    compact
-                  />
-                </div>
-                {item.url && (
-                  <div className="mt-3">
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium text-accent-amber hover:underline"
-                    >
-                      Open source
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="glass-card anim-card" style={{ animationDelay: "120ms" }}>
-        <SectionHeader
-          title="Today on Calendar"
-          description="Stay ahead of the next meetings that deserve prep or context."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => onNavigate("calendar")}>
-              View Calendar
-            </Button>
-          }
-        />
-        {todayEvents.length === 0 ? (
-          <p className="text-sm text-text-muted">No meetings are on deck today.</p>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {todayEvents.map(({ event, attentionTarget }) => (
-              <div
-                key={event.id}
-                className="rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                      {event.is_all_day ? formatDay(event.start_time) : `${formatDay(event.start_time)} · ${formatTime(event.start_time)}`}
-                    </div>
-                    <p className="mt-2 text-sm font-medium text-text-heading">
-                      {event.subject}
-                    </p>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {event.location || event.organizer || "Calendar event"}
-                    </p>
-                  </div>
-                  <AttentionFeedbackControl target={attentionTarget} surface="home" compact />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenCalendarPrep(event.id)}
-                  >
-                    Prep
-                  </Button>
-                  {event.join_url && event.is_online && (
-                    <a
-                      href={event.join_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center rounded-lg bg-white/5 px-3 py-1.5 text-xs text-text-body transition-colors hover:bg-white/10"
-                    >
-                      Join
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="glass-card anim-card" style={{ animationDelay: "160ms" }}>
-        <SectionHeader
-          title="Priority Tasks"
-          description="A short list of overdue and near-term work that should not get buried."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => onNavigate("operations")}>
-              Open Operations
-            </Button>
-          }
-        />
-        {priorityTasks.length === 0 ? (
-          <p className="text-sm text-text-muted">No tasks are rising above the baseline right now.</p>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {priorityTasks.map(({ task, attentionTarget }) => (
-              <a
-                key={task.id}
-                href={task.permalink_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05]"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                      {task.project_name || "Task"}
-                    </div>
-                    <p className="mt-2 text-sm font-medium text-text-heading">
-                      {task.name}
-                    </p>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {task.days_overdue > 0
-                        ? `${task.days_overdue}d overdue`
-                        : task.due_on
-                          ? `Due ${formatDay(task.due_on)}`
-                          : "No due date"}
-                    </p>
-                  </div>
-                  <AttentionFeedbackControl target={attentionTarget} surface="home" compact />
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="glass-card anim-card" style={{ animationDelay: "200ms" }}>
-        <SectionHeader
-          title="People to Watch"
-          description="Keep the relationship layer visible before you drop into pipeline or operational detail."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => onNavigate("people")}>
-              Open People
-            </Button>
-          }
-        />
-        {peopleToWatch.length === 0 ? (
-          <p className="text-sm text-text-muted">No relationship signals are available yet.</p>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {peopleToWatch.map((person) => {
-              const preference = getPersonPreference({
-                name: person.name,
-                email: person.email ?? null,
-              });
-
-              return (
-                <div
-                  key={person.name}
-                  className="rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold",
-                        person.urgency === "red" && "bg-accent-red/15 text-accent-red",
-                        person.urgency === "amber" && "bg-accent-amber/15 text-accent-amber",
-                        person.urgency === "teal" && "bg-accent-teal/15 text-accent-teal",
-                        person.urgency === "gray" && "bg-white/10 text-text-muted"
-                      )}
-                    >
-                      {person.name
-                        .split(" ")
-                        .map((part) => part[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-medium text-text-heading">
-                          {person.name}
-                        </p>
-                        {preference?.important && (
-                          <span className="rounded-full bg-accent-amber/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-accent-amber">
-                            Important
-                          </span>
-                        )}
-                        {preference?.pinned && (
-                          <span className="rounded-full bg-accent-teal/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-accent-teal">
-                            Pinned
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-text-muted">
-                        {person.touchpoints} touchpoint
-                        {person.touchpoints === 1 ? "" : "s"} · {person.action}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="glass-card anim-card" style={{ animationDelay: "240ms" }}>
-        <SectionHeader
-          title="Performance & Operations Watchlist"
-          description="Keep revenue risk and execution blockers visible, but leave the detail work for the deeper tabs."
-        />
-
-        <div className="grid gap-5 xl:grid-cols-2">
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-                  Performance
-                </div>
-                <p className="mt-1 text-sm text-text-muted">Deals that are aging or closing soon.</p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => onNavigate("performance")}>
-                Open Performance
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {performanceWatchlist.length > 0 ? (
-                performanceWatchlist.map((opp) => (
-                  <a
-                    key={opp.id}
-                    href={opp.sf_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05]"
-                  >
-                    <p className="text-sm font-medium text-text-heading">{opp.name}</p>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {opp.account_name} · closes in {opp.days_to_close}d
-                    </p>
-                  </a>
-                ))
-              ) : (
-                <p className="text-sm text-text-muted">No major performance risks are rising.</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-                  Operations
-                </div>
-                <p className="mt-1 text-sm text-text-muted">Orders or workflows that need intervention.</p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => onNavigate("operations")}>
-                Open Operations
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {operationsWatchlist.length > 0 ? (
-                operationsWatchlist.map((order) => (
-                  <a
-                    key={order.id}
-                    href={order.monday_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block rounded-[20px] border border-[var(--bg-card-border)] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05]"
-                  >
-                    <p className="text-sm font-medium text-text-heading">{order.name}</p>
-                    <p className="mt-1 text-xs text-text-muted">
-                      {order.status} · {order.location || "Location pending"}
-                    </p>
-                  </a>
-                ))
-              ) : (
-                <p className="text-sm text-text-muted">No major operational blockers are rising.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
+      <HomeWatchlist
+        performanceItems={data.performanceWatchlist}
+        operationsItems={data.operationsWatchlist}
+        onNavigate={onNavigate}
+        animDelay={320}
+      />
     </div>
   );
 }

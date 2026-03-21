@@ -63,7 +63,7 @@ export function MorningBrief({
   showPendingState = false,
 }: MorningBriefProps) {
   const { brief, status, error, originalTargets, refresh } = useMorningBrief();
-  const [collapsed, setCollapsed] = useState(() => getStoredBoolean(COLLAPSE_KEY, false));
+  const [collapsed, setCollapsed] = useState(() => getStoredBoolean(COLLAPSE_KEY, true));
   const [changesExpanded, setChangesExpanded] = useState(() =>
     getStoredBoolean(CHANGES_EXPANDED_KEY, false)
   );

@@ -65,12 +65,30 @@ export function SyncIndicator({
     ? Math.max(0, Math.round((now - lastSyncedAt.getTime()) / 60_000))
     : null;
 
+  const isStale = minsAgo !== null && minsAgo > 15;
+
   const timeLabel =
     minsAgo === null || minsAgo === 0
       ? "just now"
       : minsAgo === 1
         ? "1 min ago"
         : `${minsAgo} mins ago`;
+
+  if (isStale && !isSyncing) {
+    return (
+      <div
+        className={cn(
+          "inline-flex items-center gap-2 text-xs text-accent-amber",
+          className
+        )}
+      >
+        <span className="h-2 w-2 rounded-full bg-accent-amber flash-pulse" />
+        <span>
+          Updating&hellip; <span className="opacity-50">&middot;</span> Last synced {timeLabel}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -91,10 +91,11 @@ const tabs: Array<{
 interface TabBarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  badges?: Partial<Record<TabId, number | null>>;
   className?: string;
 }
 
-export function TabBar({ activeTab, onTabChange, className }: TabBarProps) {
+export function TabBar({ activeTab, onTabChange, badges, className }: TabBarProps) {
   return (
     <>
       <div className="md:hidden sticky top-0 z-50 flex items-center justify-center h-12 bg-[#1a2028]/95 backdrop-blur-xl border-b border-[rgba(217,217,214,0.12)]">
@@ -113,6 +114,7 @@ export function TabBar({ activeTab, onTabChange, className }: TabBarProps) {
         <div className="grid h-[72px] grid-cols-6">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
+            const badgeCount = badges?.[tab.id];
             return (
               <button
                 key={tab.id}
@@ -127,8 +129,13 @@ export function TabBar({ activeTab, onTabChange, className }: TabBarProps) {
                 )}
                 onClick={() => onTabChange(tab.id)}
               >
-                <span className="inline-flex items-center justify-center" aria-hidden="true">
+                <span className="relative inline-flex items-center justify-center" aria-hidden="true">
                   {tab.icon}
+                  {badgeCount != null && badgeCount > 0 && (
+                    <span className="absolute -right-1.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#00A3E1] px-1 text-[9px] font-bold text-white">
+                      {badgeCount > 99 ? "99+" : badgeCount}
+                    </span>
+                  )}
                 </span>
                 <span className="text-[10px] font-medium leading-none">
                   {tab.mobileLabel}
@@ -159,6 +166,7 @@ export function TabBar({ activeTab, onTabChange, className }: TabBarProps) {
           {ALL_TAB_IDS.map((tabId) => {
             const tab = tabs.find((item) => item.id === tabId)!;
             const isActive = activeTab === tab.id;
+            const badgeCount = badges?.[tab.id];
 
             return (
               <button
@@ -174,8 +182,13 @@ export function TabBar({ activeTab, onTabChange, className }: TabBarProps) {
                 )}
                 onClick={() => onTabChange(tab.id)}
               >
-                <span className="inline-flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4" aria-hidden="true">
+                <span className="relative inline-flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4" aria-hidden="true">
                   {tab.icon}
+                  {badgeCount != null && badgeCount > 0 && (
+                    <span className="absolute -right-1.5 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-[#00A3E1] px-0.5 text-[8px] font-bold text-white">
+                      {badgeCount > 99 ? "99+" : badgeCount}
+                    </span>
+                  )}
                 </span>
                 <span>{tab.label}</span>
               </button>
