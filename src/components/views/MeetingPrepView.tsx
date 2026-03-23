@@ -1096,6 +1096,7 @@ export function MeetingPrepView({ initialEventId }: { initialEventId?: string })
           location: selectedEvent.location,
           startTime: selectedEvent.start_time,
           endTime: selectedEvent.end_time,
+          attendees: selectedEvent.attendees ?? [],
           existingContext: {
             attendeeNames: context.attendees.map((a) => a.name),
             emailSubjects: context.emailThreads.map((t) => t.subject),

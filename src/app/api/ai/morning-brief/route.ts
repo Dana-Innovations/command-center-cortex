@@ -6,12 +6,17 @@ import { createServiceClient } from "@/lib/supabase/server";
 import {
   type MorningBrief,
   type MorningBriefResponseBody,
+  type BriefApiSnapshot,
   buildBriefPrompt,
   computeSnapshotHash,
   parseMorningBriefDraft,
   parseMorningBriefRequestBody,
   parseStoredMorningBrief,
 } from "@/lib/morning-brief";
+import {
+  buildBatchDossiers,
+  serializeDossierForPrompt,
+} from "@/lib/relationship-dossier";
 
 const BRIEF_SYSTEM_PROMPT = `You are an executive briefing assistant. Synthesize data from multiple business systems (email, calendar, tasks, Slack, Teams, Salesforce, Monday.com) into a concise, actionable morning brief.
 
@@ -23,6 +28,10 @@ Rules:
 - Headline: 1-2 sentences maximum.
 - Each action should be a single, clear directive.
 - CRITICAL: For each priorityAction, preserve the source object (itemType, itemId, provider, title) exactly as provided in the input data. This is required for the feedback system.
+- Use the peopleContext section to identify VIPs and prioritize their items. When mentioning a person, note their relevance tier if they are a VIP.
+- Surface delegation blockers prominently — overdue delegated tasks should be critical severity.
+- If yesterdayContext is provided, reference it when today has follow-up items (thread continuity).
+- Cross-reference calendar attendees against email/task activity to surface meeting prep needs.
 - Return valid JSON matching the exact schema requested. No markdown, no code fences, just raw JSON.`;
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -84,15 +93,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // --- Enrich with relationship intelligence ---
+  const enrichment = await buildBriefEnrichment(
+    supabase,
+    user.sub,
+    body.value.snapshot,
+    todayDate
+  );
+
   // --- Generate brief via Claude ---
-  const prompt = buildBriefPrompt(body.value.snapshot);
+  const prompt = buildBriefPrompt(body.value.snapshot, enrichment);
 
   try {
     const result = await generateText({
       model: anthropic("claude-sonnet-4-20250514"),
       system: BRIEF_SYSTEM_PROMPT,
       prompt,
-      maxOutputTokens: 2500,
+      maxOutputTokens: 3000,
     });
 
     const text = result.text.trim();
@@ -153,4 +170,63 @@ export async function POST(request: NextRequest) {
     console.error("Morning brief generation error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// ── Enrichment builder ────────────────────────────────────────────────────
+
+export interface BriefEnrichment {
+  peopleContext: string[];
+  yesterdayHeadline: string | null;
+}
+
+async function buildBriefEnrichment(
+  supabase: ReturnType<typeof createServiceClient>,
+  cortexUserId: string,
+  snapshot: BriefApiSnapshot,
+  todayDate: string
+): Promise<BriefEnrichment> {
+  // Extract unique person names from the snapshot
+  const nameSet = new Set<string>();
+  for (const item of snapshot.communications) {
+    if (item.sender) nameSet.add(item.sender);
+  }
+  for (const event of snapshot.calendar) {
+    if (event.organizer) nameSet.add(event.organizer);
+  }
+  for (const item of snapshot.tasks) {
+    if (item.sender) nameSet.add(item.sender);
+  }
+
+  // Parallel: fetch dossiers + yesterday's brief
+  const [dossiers, yesterdayBrief] = await Promise.all([
+    buildBatchDossiers(supabase, cortexUserId, [...nameSet]),
+    fetchYesterdayHeadline(supabase, cortexUserId, todayDate),
+  ]);
+
+  return {
+    peopleContext: dossiers.map(serializeDossierForPrompt),
+    yesterdayHeadline: yesterdayBrief,
+  };
+}
+
+async function fetchYesterdayHeadline(
+  supabase: ReturnType<typeof createServiceClient>,
+  cortexUserId: string,
+  todayDate: string
+): Promise<string | null> {
+  const yesterday = new Date(todayDate);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toLocaleDateString("en-CA");
+
+  const { data } = await supabase
+    .from("morning_brief_cache")
+    .select("brief_json")
+    .eq("cortex_user_id", cortexUserId)
+    .eq("brief_date", yesterdayStr)
+    .maybeSingle();
+
+  if (!data?.brief_json) return null;
+
+  const json = data.brief_json as Record<string, unknown>;
+  return typeof json.headline === "string" ? json.headline : null;
 }

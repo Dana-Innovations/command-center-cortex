@@ -1492,7 +1492,15 @@ function serializePromptSnapshot(snapshot: BriefApiSnapshot) {
   };
 }
 
-export function buildBriefPrompt(snapshot: BriefApiSnapshot) {
+export interface BriefPromptEnrichment {
+  peopleContext?: string[];
+  yesterdayHeadline?: string | null;
+}
+
+export function buildBriefPrompt(
+  snapshot: BriefApiSnapshot,
+  enrichment?: BriefPromptEnrichment
+) {
   const dateStr = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -1501,7 +1509,7 @@ export function buildBriefPrompt(snapshot: BriefApiSnapshot) {
     timeZone: "America/Los_Angeles",
   });
 
-  const promptPayload = {
+  const promptPayload: Record<string, unknown> = {
     today: dateStr,
     instructions: {
       headline: "1-2 sentences maximum",
@@ -1510,6 +1518,8 @@ export function buildBriefPrompt(snapshot: BriefApiSnapshot) {
         "Prioritize actions due today or already overdue",
         "Highlight cross-service correlations across communication, calendar, pipeline, and operations",
         "Use severity levels where critical means hours, warning means today, info means awareness only",
+        "Use peopleContext to identify VIPs and weight their items higher",
+        "Surface delegation blockers (overdue tasks assigned to others) as critical",
       ],
       preservePriorityActionSourceExactly: true,
       returnJsonOnly: true,
@@ -1517,6 +1527,17 @@ export function buildBriefPrompt(snapshot: BriefApiSnapshot) {
     snapshot: serializePromptSnapshot(snapshot),
     responseSchema: MORNING_BRIEF_RESPONSE_SCHEMA_EXAMPLE,
   };
+
+  // Add relationship intelligence if available
+  if (enrichment?.peopleContext && enrichment.peopleContext.length > 0) {
+    promptPayload.peopleContext = enrichment.peopleContext;
+  }
+  if (enrichment?.yesterdayHeadline) {
+    promptPayload.yesterdayContext = {
+      headline: enrichment.yesterdayHeadline,
+      note: "Reference this for thread continuity when today has follow-up items",
+    };
+  }
 
   return [
     "Generate an executive morning brief from the structured JSON payload below.",

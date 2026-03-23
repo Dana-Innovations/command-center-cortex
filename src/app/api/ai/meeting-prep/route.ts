@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
+import { getCortexUserFromRequest } from "@/lib/cortex/user";
+import { createServiceClient } from "@/lib/supabase/server";
+import {
+  buildBatchDossiers,
+  serializeDossierForPrompt,
+} from "@/lib/relationship-dossier";
 
 interface MeetingPrepRequest {
   subject: string;
@@ -8,6 +14,7 @@ interface MeetingPrepRequest {
   location: string;
   startTime: string;
   endTime: string;
+  attendees?: string[];
   existingContext: {
     attendeeNames: string[];
     emailSubjects: string[];
@@ -64,10 +71,12 @@ export async function POST(request: NextRequest) {
 
   // Build context summary from existing Cortex data
   const contextLines: string[] = [];
-  if (existingContext?.attendeeNames?.length) {
-    contextLines.push(
-      `Known attendees: ${existingContext.attendeeNames.join(", ")}`
-    );
+  const attendeeNames = body.attendees?.length
+    ? body.attendees
+    : existingContext?.attendeeNames ?? [];
+
+  if (attendeeNames.length) {
+    contextLines.push(`Known attendees: ${attendeeNames.join(", ")}`);
   }
   if (existingContext?.emailSubjects?.length) {
     contextLines.push(
@@ -88,6 +97,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Enrich with relationship dossiers from Supabase
+  let relationshipSection = "";
+  const user = await getCortexUserFromRequest(request);
+  if (user && attendeeNames.length > 0) {
+    try {
+      const supabase = createServiceClient();
+      const dossiers = await buildBatchDossiers(
+        supabase,
+        user.sub,
+        attendeeNames
+      );
+      if (dossiers.length > 0) {
+        relationshipSection =
+          "\n\nInternal Relationship Intelligence (from CRM and interaction history):\n" +
+          dossiers.map(serializeDossierForPrompt).join("\n\n");
+      }
+    } catch (e) {
+      console.warn("[meeting-prep] dossier enrichment failed:", e);
+    }
+  }
+
   const prompt = `You are an executive meeting prep researcher. Research and prepare a briefing for this meeting.
 
 Meeting: ${subject}
@@ -95,12 +125,13 @@ When: ${startTime} – ${endTime}
 Organizer: ${organizer || "Unknown"}
 Location: ${location || "Not specified"}
 
-${contextLines.length > 0 ? `Internal context from CRM and email:\n${contextLines.join("\n")}` : "No internal context available."}
+${contextLines.length > 0 ? `Internal context from CRM and email:\n${contextLines.join("\n")}` : "No internal context available."}${relationshipSection}
 
 Instructions:
-1. Search the web for each attendee and their company to find their current role, recent news, and relevant background.
-2. Search for any companies mentioned in the meeting subject or attendee affiliations for recent developments.
-3. Based on ALL gathered context (internal CRM data + web research), generate:
+1. Prioritize internal relationship data — the relationship intelligence above shows the user's actual history with each attendee. Use it to generate highly specific, personalized talking points.
+2. Search the web for each attendee and their company to find their current role, recent news, and relevant background.
+3. Search for any companies mentioned in the meeting subject or attendee affiliations for recent developments.
+4. Based on ALL gathered context (internal relationship data + CRM data + web research), generate:
    - A 2-3 sentence executive summary of what this meeting is likely about and how to approach it
    - Insights for each attendee (current role, company, relevant background)
    - Insights for each company involved (recent news, developments, market position)
@@ -123,7 +154,7 @@ Return your response as JSON matching this exact schema (no markdown, no code fe
         web_search: anthropic.tools.webSearch_20250305(),
       },
       system:
-        "You are an executive meeting prep researcher. Use web search to find current information about attendees and companies. Always return valid JSON.",
+        "You are an executive meeting prep researcher. Prioritize internal relationship intelligence (interaction history, deals, delegated tasks) over web research — this shows the user's actual history with each attendee. Supplement with web search for external news, roles, and company context. Always return valid JSON.",
       prompt,
       stopWhen: stepCountIs(8),
       maxOutputTokens: 3000,

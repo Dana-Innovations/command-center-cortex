@@ -3,11 +3,11 @@
 import { useState, useMemo, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { usePeople } from "@/hooks/usePeople";
+import { usePeopleRelevance } from "@/hooks/usePeopleRelevance";
 import { useSalesforce } from "@/hooks/useSalesforce";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PersonDetailPanel } from "./PersonDetailPanel";
 import type { TouchpointItem } from "@/hooks/usePeople";
-import type { GroupedFeedItem } from "@/lib/people-utils";
 import { useAttention } from "@/lib/attention/client";
 import { getAttentionPersonRankingWeight } from "@/lib/attention/people";
 import type {
@@ -36,6 +36,7 @@ export function UnifiedPeopleView() {
   const { people, loading: peopleLoading } = usePeople();
   const { openOpps, loading: sfLoading } = useSalesforce();
   const { getPersonPreference } = useAttention();
+  const { getRelevanceScore, hasData: hasRelevanceData } = usePeopleRelevance();
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [selectedPerson, setSelectedPerson] = useState<UnifiedContact | null>(null);
   const [urgencyFilter, setUrgencyFilter] = useState<"all" | "red" | "amber" | "teal" | "gray">("all");
@@ -73,6 +74,9 @@ export function UnifiedPeopleView() {
         email: person.email ?? null,
       });
 
+      const personKey = person.name.toLowerCase().trim();
+      const relevanceScore = getRelevanceScore(personKey) ?? undefined;
+
       return {
         ...person,
         heat,
@@ -82,9 +86,10 @@ export function UnifiedPeopleView() {
         lastInteractionDate: lastDate,
         relatedOpps,
         attentionPreference,
+        relevanceScore,
       };
     });
-  }, [getPersonPreference, now, openOpps, people]);
+  }, [getPersonPreference, getRelevanceScore, now, openOpps, people]);
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -276,51 +281,62 @@ export function UnifiedPeopleView() {
         </div>
       )}
 
-      {TIER_CONFIG.map((tier) => {
-        const tierPeople = filtered.filter(
-          (c) => c.urgency === tier.key && !c.attentionPreference?.pinned
-        );
-        if (tierPeople.length === 0) return null;
+      {/* Dynamic section: relevance-ranked or fallback to urgency tiers */}
+      {hasRelevanceData ? (
+        <RelevanceSection
+          contacts={filtered}
+          maxTouchpoints={maxTouchpoints}
+          expandedCards={expandedCards}
+          onToggle={toggle}
+          onDeepDive={setSelectedPerson}
+        />
+      ) : (
+        TIER_CONFIG.map((tier) => {
+          const tierPeople = filtered.filter(
+            (c) => c.urgency === tier.key && !c.attentionPreference?.pinned
+          );
+          if (tierPeople.length === 0) return null;
 
-        const sorted = [...tierPeople].sort((a, b) => {
-          const preferenceDelta =
-            getAttentionPersonRankingWeight(b.attentionPreference) -
-            getAttentionPersonRankingWeight(a.attentionPreference);
-          if (preferenceDelta !== 0) return preferenceDelta;
-          return b.touchpoints - a.touchpoints;
-        });
+          const sorted = [...tierPeople].sort((a, b) => {
+            const preferenceDelta =
+              getAttentionPersonRankingWeight(b.attentionPreference) -
+              getAttentionPersonRankingWeight(a.attentionPreference);
+            if (preferenceDelta !== 0) return preferenceDelta;
+            return b.touchpoints - a.touchpoints;
+          });
 
-        return (
-          <div key={tier.key}>
-            <div className="flex items-center gap-2 mb-3">
-              <h3
-                className={cn(
-                  "text-xs font-semibold uppercase tracking-wider",
-                  tier.color
-                )}
-              >
-                {tier.label}
-              </h3>
-              <span className="text-[10px] bg-white/5 text-text-muted px-2 py-0.5 rounded-full">
-                {sorted.length}
-              </span>
+          return (
+            <div key={tier.key}>
+              <div className="flex items-center gap-2 mb-3">
+                <h3
+                  className={cn(
+                    "text-xs font-semibold uppercase tracking-wider",
+                    tier.color
+                  )}
+                >
+                  {tier.label}
+                </h3>
+                <span className="text-[10px] bg-white/5 text-text-muted px-2 py-0.5 rounded-full">
+                  {sorted.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {sorted.map((contact) => (
+                  <ContactCard
+                    key={contact.name}
+                    contact={contact}
+                    maxTouchpoints={maxTouchpoints}
+                    isExpanded={expandedCards.has(contact.name)}
+                    onToggle={() => toggle(contact.name)}
+                    onDeepDive={() => setSelectedPerson(contact)}
+                  />
+                ))}
+              </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {sorted.map((contact) => (
-                <ContactCard
-                  key={contact.name}
-                  contact={contact}
-                  maxTouchpoints={maxTouchpoints}
-                  isExpanded={expandedCards.has(contact.name)}
-                  onToggle={() => toggle(contact.name)}
-                  onDeepDive={() => setSelectedPerson(contact)}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })
+      )}
 
       {filtered.length === 0 && (
         <div className="text-center py-8 text-text-muted text-sm">
@@ -338,6 +354,69 @@ export function UnifiedPeopleView() {
           relatedOpps={selectedPerson.relatedOpps}
         />
       )}
+    </div>
+  );
+}
+
+// ── Relevance-Ranked Section ──────────────────────────────────────────────
+
+function RelevanceSection({
+  contacts,
+  maxTouchpoints,
+  expandedCards,
+  onToggle,
+  onDeepDive,
+}: {
+  contacts: UnifiedContact[];
+  maxTouchpoints: number;
+  expandedCards: Set<string>;
+  onToggle: (name: string) => void;
+  onDeepDive: (contact: UnifiedContact) => void;
+}) {
+  const nonPinned = contacts.filter((c) => !c.attentionPreference?.pinned);
+  const sorted = [...nonPinned].sort((a, b) => {
+    const aScore = a.relevanceScore ?? -1;
+    const bScore = b.relevanceScore ?? -1;
+    if (aScore !== bScore) return bScore - aScore;
+    // Fall back to attention weight then touchpoints
+    const preferenceDelta =
+      getAttentionPersonRankingWeight(b.attentionPreference) -
+      getAttentionPersonRankingWeight(a.attentionPreference);
+    if (preferenceDelta !== 0) return preferenceDelta;
+    return b.touchpoints - a.touchpoints;
+  });
+
+  if (sorted.length === 0) return null;
+
+  const maxRelevance = Math.max(1, ...sorted.map((c) => c.relevanceScore ?? 0));
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-accent-amber">
+          Surfaced for You
+        </h3>
+        <span className="text-[10px] bg-white/5 text-text-muted px-2 py-0.5 rounded-full">
+          {sorted.length}
+        </span>
+        <span className="text-[10px] text-text-muted/60 ml-auto">
+          ranked by relationship signals
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {sorted.map((contact) => (
+          <ContactCard
+            key={`rel-${contact.name}`}
+            contact={contact}
+            maxTouchpoints={maxTouchpoints}
+            isExpanded={expandedCards.has(contact.name)}
+            onToggle={() => onToggle(contact.name)}
+            onDeepDive={() => onDeepDive(contact)}
+            relevanceMax={maxRelevance}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -369,12 +448,14 @@ function ContactCard({
   isExpanded,
   onToggle,
   onDeepDive,
+  relevanceMax,
 }: {
   contact: UnifiedContact;
   maxTouchpoints: number;
   isExpanded: boolean;
   onToggle: () => void;
   onDeepDive: () => void;
+  relevanceMax?: number;
 }) {
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
   const toggleThread = useCallback((key: string) => {
@@ -396,7 +477,9 @@ function ContactCard({
   const meetingItems = contact.items.filter((i) => i.ch === "meeting");
   const asanaItems = contact.items.filter((i) => i.ch === "asana");
   const slackItems = contact.items.filter((i) => i.ch === "slack");
-  const densityPct = Math.round((contact.touchpoints / maxTouchpoints) * 100);
+  const densityPct = relevanceMax && contact.relevanceScore != null
+    ? Math.round((contact.relevanceScore / relevanceMax) * 100)
+    : Math.round((contact.touchpoints / maxTouchpoints) * 100);
   const heatCfg = HEAT_CONFIG[contact.heat];
 
   return (

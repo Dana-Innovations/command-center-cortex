@@ -30,6 +30,7 @@ export interface CalendarEvent {
   end_time: string;
   is_all_day: boolean;
   organizer: string;
+  attendees?: string[];
   is_online: boolean;
   join_url: string;
   outlook_url: string;

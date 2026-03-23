@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, startTransition } from "react";
+import { CalendarDays, Mail, MessageSquare, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePersonDetail } from "@/hooks/usePersonDetail";
 import type { Person } from "@/hooks/usePeople";
@@ -164,7 +165,7 @@ interface PersonDetailPanelProps {
   relatedOpps?: SalesforceOpportunity[];
 }
 
-export function PersonDetailPanel({ person, onClose, heat, heatDays: _heatDays, relatedOpps }: PersonDetailPanelProps) {
+export function PersonDetailPanel({ person, onClose, heat, relatedOpps }: PersonDetailPanelProps) {
   const { detail, loading, error, refresh } = usePersonDetail(
     person.name,
     person.email,
@@ -318,7 +319,10 @@ export function PersonDetailPanel({ person, onClose, heat, heatDays: _heatDays, 
                 className="text-xs px-2 py-1 rounded border border-[var(--bg-card-border)] text-text-muted hover:text-text-body transition-colors"
                 title="Refresh"
               >
-                \u21BB
+                <RefreshCw
+                  className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+                />
+                <span className="sr-only">Refresh</span>
               </button>
               <button
                 onClick={onClose}
@@ -442,12 +446,18 @@ export function PersonDetailPanel({ person, onClose, heat, heatDays: _heatDays, 
               rel="noopener noreferrer"
               className="text-[11px] px-3 py-1.5 rounded border border-[var(--bg-card-border)] text-text-muted hover:text-text-body hover:border-accent-amber/30 transition-colors"
             >
-              \u2709 Email
+              <span className="inline-flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5" />
+                <span>Email</span>
+              </span>
             </a>
           )}
           {person.teamsChatId && (
             <span className="text-[11px] px-3 py-1.5 rounded border border-[var(--bg-card-border)] text-text-muted">
-              \uD83D\uDCAC Teams DM active
+              <span className="inline-flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" />
+                <span>Teams chat available</span>
+              </span>
             </span>
           )}
         </div>
@@ -614,7 +624,10 @@ function MeetingCard({ meeting, isUpcoming }: { meeting: PersonDetailMeeting; is
     <div className="py-2.5 border-b border-[var(--bg-card-border)] last:border-0">
       <div className="flex items-start justify-between gap-2">
         <ItemLink url={meeting.url} className="text-xs text-text-body line-clamp-1 flex-1">
-          \uD83D\uDCC5 {meeting.subject}
+          <span className="inline-flex items-center gap-1.5">
+            <CalendarDays className="h-3.5 w-3.5 text-accent-teal" />
+            <span>{meeting.subject}</span>
+          </span>
         </ItemLink>
         <span className={cn("text-[10px] whitespace-nowrap shrink-0", isUpcoming ? "text-accent-teal" : "text-text-muted")}>
           {formatDate(meeting.date)}

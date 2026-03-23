@@ -14,6 +14,8 @@ import {
 import { getConnections, type CortexConnection } from "@/lib/cortex/connections";
 import { getCortexUserFromRequest } from "@/lib/cortex/user";
 import { normalizeCalendarDateTime } from "@/lib/calendar";
+import { persistPeopleSnapshots } from "@/lib/people-relevance";
+import { createServiceClient } from "@/lib/supabase/server";
 import type { AsanaCommentThread, Task } from "@/lib/types";
 
 const CORTEX_URL = process.env.NEXT_PUBLIC_CORTEX_URL ?? "";
@@ -689,6 +691,14 @@ async function fetchCalendar(
         emailAddress?: { name?: string; address?: string };
         name?: string;
       } | null;
+      const rawAttendees = (e.attendees ?? []) as Array<{
+        emailAddress?: { name?: string; address?: string };
+        type?: string;
+        status?: { response?: string };
+      }>;
+      const attendeeNames = rawAttendees
+        .map((a) => a.emailAddress?.name || a.emailAddress?.address || "")
+        .filter((n) => n.length > 0);
       const startTz = start?.timeZone || "";
       const endTz = endTime?.timeZone || "";
       const startDt =
@@ -716,6 +726,7 @@ async function fetchCalendar(
         end_time: normalizedEnd,
         is_all_day: Boolean(e.isAllDay),
         organizer: organizer?.emailAddress?.name || organizer?.name || (typeof e.organizer === "string" ? e.organizer : ""),
+        attendees: attendeeNames,
         is_online: e.isOnlineMeeting as boolean,
         join_url:
           (e.onlineMeetingUrl as string) || (e.webLink as string) || "",
@@ -1812,6 +1823,17 @@ export async function GET(request: NextRequest) {
 
   const pbi = (resolved.powerbi ?? { reports: [], kpis: [] }) as { reports: unknown[]; kpis: unknown[] };
   const sfKpis = (resolved.sfKpis ?? []) as unknown[];
+
+  // Fire-and-forget: persist people interaction snapshots for relevance scoring
+  if (cortexUser) {
+    void persistPeopleSnapshots(
+      cortexUser.sub,
+      authenticatedUser.name,
+      authenticatedUser.email,
+      resolved,
+      createServiceClient()
+    );
+  }
 
   return NextResponse.json({
     emails: resolved.emails ?? [],

@@ -18,6 +18,19 @@ function stripHtml(value: string | null | undefined): string {
     .trim();
 }
 
+function decodeUnicodeEscapes(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  );
+}
+
+function cleanDisplayText(value: string | null | undefined): string {
+  return stripHtml(decodeUnicodeEscapes(value))
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function nameMatches(candidate: string, target: string): boolean {
   if (!candidate || !target) return false;
   const a = candidate.toLowerCase().trim();
@@ -122,10 +135,10 @@ export async function GET(request: NextRequest) {
     );
 
     const identity = {
-      name: personName,
+      name: cleanDisplayText(personName),
       email: personEmail || String(matchedPerson?.mail ?? matchedPerson?.email ?? ""),
-      title: String(matchedPerson?.jobTitle ?? matchedPerson?.title ?? ""),
-      department: String(matchedPerson?.department ?? ""),
+      title: cleanDisplayText(String(matchedPerson?.jobTitle ?? matchedPerson?.title ?? "")),
+      department: cleanDisplayText(String(matchedPerson?.department ?? "")),
     };
 
     // Parse emails
@@ -146,12 +159,12 @@ export async function GET(request: NextRequest) {
           const sender = m.sender as Record<string, unknown> | undefined;
           const senderAddr = sender?.emailAddress as Record<string, unknown> | undefined;
           return {
-            subject: String(m.subject ?? ""),
-            preview: stripHtml(String(m.bodyPreview ?? m.preview ?? m.body_preview ?? "")).slice(0, 200),
+            subject: cleanDisplayText(String(m.subject ?? "")),
+            preview: cleanDisplayText(String(m.bodyPreview ?? m.preview ?? m.body_preview ?? "")).slice(0, 200),
             date: String(m.receivedDateTime ?? m.received_at ?? ""),
             direction: "received" as const,
             isRead: m.isRead === true || m.is_read === true,
-            from: String(m.from_name ?? m.from ?? senderAddr?.name ?? ""),
+            from: cleanDisplayText(String(m.from_name ?? m.from ?? senderAddr?.name ?? "")),
             url: String(m.webLink ?? m.outlook_url ?? "#"),
           };
         }),
@@ -173,8 +186,8 @@ export async function GET(request: NextRequest) {
           );
         })
         .map((m) => ({
-          subject: String(m.subject ?? ""),
-          preview: stripHtml(String(m.bodyPreview ?? m.preview ?? m.body_preview ?? "")).slice(0, 200),
+          subject: cleanDisplayText(String(m.subject ?? "")),
+          preview: cleanDisplayText(String(m.bodyPreview ?? m.preview ?? m.body_preview ?? "")).slice(0, 200),
           date: String(m.sentDateTime ?? m.received_at ?? ""),
           direction: "sent" as const,
           isRead: true,
@@ -206,16 +219,16 @@ export async function GET(request: NextRequest) {
         const attendeeNames = attendees
           .map((a) => {
             const addr = a.emailAddress as Record<string, unknown> | undefined;
-            return String(addr?.name ?? "");
+            return cleanDisplayText(String(addr?.name ?? ""));
           })
           .filter(Boolean)
           .slice(0, 5);
         const loc = e.location as Record<string, unknown> | undefined;
         return {
-          subject: String(e.subject ?? ""),
+          subject: cleanDisplayText(String(e.subject ?? "")),
           date: String(e.start_time ?? (e.start as Record<string, unknown> | undefined)?.dateTime ?? ""),
           endTime: String(e.end_time ?? (e.end as Record<string, unknown> | undefined)?.dateTime ?? ""),
-          location: String(loc?.displayName ?? e.location_name ?? ""),
+          location: cleanDisplayText(String(loc?.displayName ?? e.location_name ?? "")),
           isOnline: Boolean(e.isOnlineMeeting ?? e.is_online ?? false),
           attendeeCount: attendees.length,
           attendees: attendeeNames,
@@ -229,8 +242,8 @@ export async function GET(request: NextRequest) {
     const slackRaw = asArray(slackResult.messages ?? slackResult.matches ?? slackResult.value ?? []);
     const slackMessages = slackRaw
       .map((m) => ({
-        text: stripHtml(String(m.text ?? "")).slice(0, 200),
-        channel: String(m.channel_name ?? (m.channel as Record<string, unknown> | undefined)?.name ?? ""),
+        text: cleanDisplayText(String(m.text ?? "")).slice(0, 200),
+        channel: cleanDisplayText(String(m.channel_name ?? (m.channel as Record<string, unknown> | undefined)?.name ?? "")),
         date: String(m.timestamp ?? m.ts ?? ""),
         url: String(m.permalink ?? "#"),
       }))
@@ -241,9 +254,9 @@ export async function GET(request: NextRequest) {
     const tasksRaw = asArray(asanaResult.tasks ?? asanaResult.data ?? asanaResult.value ?? []);
     const tasks = tasksRaw
       .map((t) => ({
-        name: String(t.name ?? ""),
-        project: String(t.project_name ?? asArray(t.projects)[0]?.name ?? ""),
-        status: t.completed ? "completed" : "open",
+        name: cleanDisplayText(String(t.name ?? "")),
+        project: cleanDisplayText(String(t.project_name ?? asArray(t.projects)[0]?.name ?? "")),
+        status: cleanDisplayText(String(t.completed ? "completed" : "open")),
         due: String(t.due_on ?? ""),
         url: String(t.permalink_url ?? "#"),
       }));
@@ -255,8 +268,8 @@ export async function GET(request: NextRequest) {
       const messagesRaw = asArray(chatResult.messages ?? chatResult.value ?? []);
       for (const m of messagesRaw) {
         chats.push({
-          text: stripHtml(String(m.text ?? (m.body as Record<string, unknown> | undefined)?.content ?? "")).slice(0, 200),
-          from: String(m.from ?? ""),
+          text: cleanDisplayText(String(m.text ?? (m.body as Record<string, unknown> | undefined)?.content ?? "")).slice(0, 200),
+          from: cleanDisplayText(String(m.from ?? "")),
           date: String(m.timestamp ?? m.createdDateTime ?? ""),
           url: "",
         });

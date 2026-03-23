@@ -16,6 +16,7 @@ export interface UnifiedContact extends Person {
   lastInteractionDate: string | null;
   relatedOpps: SalesforceOpportunity[];
   attentionPreference: AttentionPersonPreference | null;
+  relevanceScore?: number;
 }
 
 // ── Styling Constants ─────────────────────────────────────────────────────

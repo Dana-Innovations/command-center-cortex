@@ -5,6 +5,11 @@ import { getWritingStyle } from "@/lib/constants";
 import { getCortexToken, cortexCall, cortexInit } from "@/lib/cortex/client";
 import { getCortexUserFromRequest } from "@/lib/cortex/user";
 import { extractEmailDetail } from "@/lib/email-reply";
+import { createServiceClient } from "@/lib/supabase/server";
+import {
+  buildRelationshipDossier,
+  serializeDossierForPrompt,
+} from "@/lib/relationship-dossier";
 
 function trimForModel(value: string, max = 6000): string {
   const trimmed = value.trim();
@@ -81,6 +86,25 @@ export async function POST(request: NextRequest) {
 
   const signedInUser = await getCortexUserFromRequest(request);
   const isAri = signedInUser?.email.toLowerCase() === "ari@sonance.com";
+
+  // Enrich with sender relationship context
+  let relationshipContext = "";
+  if (signedInUser && resolvedSender) {
+    try {
+      const supabase = createServiceClient();
+      const dossier = await buildRelationshipDossier({
+        supabase,
+        cortexUserId: signedInUser.sub,
+        personName: resolvedSender,
+      });
+      if (dossier.relevanceTier !== "unknown") {
+        relationshipContext = serializeDossierForPrompt(dossier);
+      }
+    } catch (e) {
+      console.warn("[draft-reply] dossier enrichment failed:", e);
+    }
+  }
+
   const systemPrompt = `${getWritingStyle(isAri)}
 
 You are drafting a reply to a ${channel} message.
@@ -89,9 +113,14 @@ Do not echo the original salutation unless it genuinely fits the reply.
 Do not address copied recipients unless the reply truly needs them.
 For appreciation or thank-you notes, keep the reply to 1-3 sentences.
 Do not invent meetings, next steps, owners, or commitments unless the message or user guidance explicitly supports them.
+${relationshipContext ? "Use the relationship context to inform tone and content — reference pending items or upcoming meetings when relevant to the reply. Never fabricate context." : ""}
 Output only the reply body. No subject line. No explanation.`;
 
   try {
+    const relationshipSection = relationshipContext
+      ? `\nRelationship context:\n${relationshipContext}\n`
+      : "";
+
     const result = streamText({
       model: anthropic("claude-sonnet-4-20250514"),
       system: systemPrompt,
@@ -101,7 +130,7 @@ Output only the reply body. No subject line. No explanation.`;
           content: [
             `Incoming ${channel} subject: ${resolvedSubject}`,
             `From: ${resolvedSender}`,
-            "",
+            relationshipSection,
             "Latest message to reply to:",
             trimForModel(resolvedMessage),
             earlierContext
