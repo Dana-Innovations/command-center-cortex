@@ -3,6 +3,7 @@ import type {
   AttentionProfile,
   AttentionTarget,
   FeedbackEventRecord,
+  FocusExceptionRule,
   FocusPreferenceRecord,
   ItemFeedbackRecord,
   PriorityBiasRecord,
@@ -33,6 +34,7 @@ const ATTENTION_SCHEMA_TABLE_NAMES = [
   "user_item_feedback",
   "user_feedback_events",
   "user_priority_biases",
+  "user_focus_exception_rules",
 ] as const;
 
 export const ATTENTION_SCHEMA_MISSING_MESSAGE =
@@ -237,7 +239,7 @@ export async function loadAttentionProfile(
   const supabase = createServiceClient();
   const settings = await ensureUserSettings(cortexUserId);
 
-  const [focusResult, feedbackResult, biasResult] = await Promise.all([
+  const [focusResult, feedbackResult, biasResult, exceptionResult] = await Promise.all([
     supabase
       .from("user_focus_preferences")
       .select("*")
@@ -253,11 +255,16 @@ export async function loadAttentionProfile(
       .select("*")
       .eq("cortex_user_id", cortexUserId)
       .order("bias_score", { ascending: false }),
+    supabase
+      .from("user_focus_exception_rules")
+      .select("*")
+      .eq("cortex_user_id", cortexUserId),
   ]);
 
   if (focusResult.error) throw new Error(focusResult.error.message);
   if (feedbackResult.error) throw new Error(feedbackResult.error.message);
   if (biasResult.error) throw new Error(biasResult.error.message);
+  if (exceptionResult.error) throw new Error(exceptionResult.error.message);
 
   return {
     settings,
@@ -270,6 +277,7 @@ export async function loadAttentionProfile(
     biases: (biasResult.data ?? [])
       .map((row) => normalizeBiasRow(row, cortexUserId))
       .filter((row): row is PriorityBiasRecord => row !== null),
+    exceptionRules: (exceptionResult.data ?? []) as FocusExceptionRule[],
   };
 }
 

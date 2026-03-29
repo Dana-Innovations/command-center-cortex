@@ -3,6 +3,7 @@ import type {
   AttentionItem,
   AttentionProvider,
   AttentionTarget,
+  FocusExceptionRule,
   FocusPreferenceRecord,
   ImportanceTier,
   PriorityBiasRecord,
@@ -347,21 +348,66 @@ export function computeLearnedBias(
   return computeLearnedBiasFromLookup(target, buildBiasLookup(records));
 }
 
+function checkExceptionRules(
+  target: AttentionTarget,
+  rules: FocusExceptionRule[]
+): ImportanceTier | null {
+  for (const rule of rules) {
+    // Provider filter
+    if (rule.provider && target.provider !== rule.provider) continue;
+    // Entity filter
+    if (rule.entity_id && !target.resourceKeys.some((k) => k.includes(rule.entity_id!))) continue;
+
+    // Build searchable text from target
+    const searchText = [target.title, ...target.topicKeys].join(" ").toLowerCase();
+    const conditionValue = rule.condition_value.toLowerCase();
+
+    let matches = false;
+    switch (rule.condition_type) {
+      case "topic":
+      case "keyword":
+        matches = searchText.includes(conditionValue);
+        break;
+      case "sender":
+        matches = target.actorKeys.some((k) => k.toLowerCase().includes(conditionValue));
+        break;
+      case "label":
+        matches = searchText.includes(conditionValue);
+        break;
+      case "mention":
+        matches = searchText.includes(conditionValue);
+        break;
+    }
+
+    if (matches) return rule.override_tier;
+  }
+  return null;
+}
+
 function scoreTarget(
   target: AttentionTarget,
   focusLookup: Map<string, FocusPreferenceRecord>,
   biasLookup: Map<string, PriorityBiasRecord>,
-  peoplePrefs: AttentionPersonPreference[]
+  peoplePrefs: AttentionPersonPreference[],
+  exceptionRules: FocusExceptionRule[] = []
 ): AttentionItem {
-  const explicitImportance = resolveExplicitImportanceFromLookup(target, focusLookup);
+  let explicitImportance = resolveExplicitImportanceFromLookup(target, focusLookup);
   const learnedBias = computeLearnedBiasFromLookup(target, biasLookup);
   const personPreference =
     peoplePrefs.length > 0
       ? matchAttentionPersonPreference(peoplePrefs, { actorKeys: target.actorKeys })
       : null;
   const personBoost = getAttentionPersonScoreBoost(personPreference);
-  const importanceBoost = IMPORTANCE_BOOSTS[explicitImportance];
-  const hidden = explicitImportance === "muted";
+  let importanceBoost = IMPORTANCE_BOOSTS[explicitImportance];
+  let hidden = explicitImportance === "muted";
+
+  // Check exception rules for override
+  const exceptionOverride = checkExceptionRules(target, exceptionRules);
+  if (exceptionOverride) {
+    explicitImportance = exceptionOverride;
+    importanceBoost = IMPORTANCE_BOOSTS[exceptionOverride];
+    hidden = exceptionOverride === "muted";
+  }
   const finalScore = hidden
     ? 0
     : Math.max(
@@ -410,13 +456,15 @@ export function applyAttentionProfile(
   target: AttentionTarget,
   focusPreferences: FocusPreferenceRecord[],
   biases: PriorityBiasRecord[],
-  settings?: UserSettingsRecord | null
+  settings?: UserSettingsRecord | null,
+  exceptionRules: FocusExceptionRule[] = []
 ): AttentionItem {
   return scoreTarget(
     target,
     buildFocusLookup(focusPreferences),
     buildBiasLookup(biases),
-    getAttentionPersonPreferences(settings)
+    getAttentionPersonPreferences(settings),
+    exceptionRules
   );
 }
 
@@ -427,12 +475,13 @@ export function applyAttentionProfile(
 export function createAttentionScorer(
   focusPreferences: FocusPreferenceRecord[],
   biases: PriorityBiasRecord[],
-  settings?: UserSettingsRecord | null
+  settings?: UserSettingsRecord | null,
+  exceptionRules: FocusExceptionRule[] = []
 ): (target: AttentionTarget) => AttentionItem {
   const focusLookup = buildFocusLookup(focusPreferences);
   const biasLookup = buildBiasLookup(biases);
   const peoplePrefs = getAttentionPersonPreferences(settings);
-  return (target) => scoreTarget(target, focusLookup, biasLookup, peoplePrefs);
+  return (target) => scoreTarget(target, focusLookup, biasLookup, peoplePrefs, exceptionRules);
 }
 
 export function mergeAttentionSettings(

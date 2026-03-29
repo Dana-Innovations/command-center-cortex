@@ -696,7 +696,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
       createAttentionScorer(
         profile?.focusPreferences ?? [],
         profile?.biases ?? [],
-        profile?.settings
+        profile?.settings,
+        profile?.exceptionRules ?? []
       ),
     [profile]
   );

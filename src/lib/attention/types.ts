@@ -190,6 +190,7 @@ export interface AttentionProfile {
   focusPreferences: FocusPreferenceRecord[];
   feedback: ItemFeedbackRecord[];
   biases: PriorityBiasRecord[];
+  exceptionRules: FocusExceptionRule[];
 }
 
 /* ── Exception Rules ── */
