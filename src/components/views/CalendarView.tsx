@@ -78,7 +78,7 @@ function NowMarker() {
   );
 }
 
-function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
+function EventCard({ ev, now, onPrepMeeting }: { ev: CalendarEvent; now: Date; onPrepMeeting?: (eventId: string) => void }) {
   const start = toPacificDate(ev.start_time);
   const end = toPacificDate(ev.end_time);
   const isHappening = Boolean(start && end && start <= now && now < end);
@@ -112,11 +112,19 @@ function EventCard({ ev, now }: { ev: CalendarEvent; now: Date }) {
           Join
         </a>
       )}
+      {onPrepMeeting && (
+        <button
+          onClick={() => onPrepMeeting(ev.id)}
+          className="shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25 transition-colors"
+        >
+          Prep
+        </button>
+      )}
     </div>
   );
 }
 
-function WeekEventChip({ ev, now }: { ev: CalendarEvent; now: Date }) {
+function WeekEventChip({ ev, now, onPrepMeeting }: { ev: CalendarEvent; now: Date; onPrepMeeting?: (eventId: string) => void }) {
   const start = toPacificDate(ev.start_time);
   const end = toPacificDate(ev.end_time);
   const isHappening = Boolean(start && end && start <= now && now < end);
@@ -150,6 +158,14 @@ function WeekEventChip({ ev, now }: { ev: CalendarEvent; now: Date }) {
           {ev.location || ev.organizer}
         </p>
       )}
+      {onPrepMeeting && (
+        <button
+          onClick={() => onPrepMeeting(ev.id)}
+          className="mt-1.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-accent-amber hover:text-accent-amber/80 transition-colors"
+        >
+          Prep →
+        </button>
+      )}
     </div>
   );
 }
@@ -162,7 +178,11 @@ interface DayBucket {
   isToday: boolean;
 }
 
-export function CalendarView() {
+interface CalendarViewProps {
+  onPrepMeeting?: (eventId: string) => void;
+}
+
+export function CalendarView({ onPrepMeeting }: CalendarViewProps) {
   const { events: calEvents } = useCalendar();
   const meetingPrep = useMemo(() => transformMeetingPrep(calEvents), [calEvents]);
 
@@ -172,7 +192,12 @@ export function CalendarView() {
     return () => clearInterval(timer);
   }, []);
 
-  const weekStart = useMemo(() => startOfWeek(now), [now]);
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const weekStart = useMemo(() => {
+    const base = startOfWeek(now);
+    return addDays(base, weekOffset * 7);
+  }, [now, weekOffset]);
 
   const sortedEvents = useMemo(() => {
     return [...calEvents]
@@ -215,7 +240,13 @@ export function CalendarView() {
     });
   }, [now, sortedEvents, weekStart]);
 
-  const todayBucket = weekDays.find((day) => day.isToday) ?? weekDays[0];
+  const todayBucket = weekOffset === 0
+    ? (weekDays.find((day) => day.isToday) ?? weekDays[0])
+    : weekDays[0];
+
+  const dayLabel = weekOffset === 0
+    ? "Today"
+    : todayBucket.date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 
   const nowInsertBefore = useMemo(() => {
     for (let i = 0; i < todayBucket.timed.length; i++) {
@@ -258,9 +289,33 @@ export function CalendarView() {
               </svg>
               Week at a Glance
             </h2>
-            <p className="mt-1 text-xs text-text-muted">
-              {formatWeekRange(weekStart)} · Live from Outlook
-            </p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                onClick={() => setWeekOffset((o) => o - 1)}
+                className="rounded-md border border-[var(--bg-card-border)] px-1.5 py-0.5 text-xs text-text-muted transition-colors hover:text-text-body hover:border-[var(--bg-card-hover-border)]"
+                aria-label="Previous week"
+              >
+                ‹
+              </button>
+              <span className="text-xs text-text-muted min-w-[140px] text-center">
+                {formatWeekRange(weekStart)}
+              </span>
+              <button
+                onClick={() => setWeekOffset((o) => o + 1)}
+                className="rounded-md border border-[var(--bg-card-border)] px-1.5 py-0.5 text-xs text-text-muted transition-colors hover:text-text-body hover:border-[var(--bg-card-hover-border)]"
+                aria-label="Next week"
+              >
+                ›
+              </button>
+              {weekOffset !== 0 && (
+                <button
+                  onClick={() => setWeekOffset(0)}
+                  className="rounded-md border border-[var(--bg-card-border)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted transition-colors hover:text-text-body hover:border-[var(--bg-card-hover-border)]"
+                >
+                  Today
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-3">
@@ -342,7 +397,7 @@ export function CalendarView() {
                 {day.timed.length > 0 ? (
                   <div className="space-y-2">
                     {day.timed.map((event) => (
-                      <WeekEventChip key={`${event.id}-${day.date.toISOString()}`} ev={event} now={now} />
+                      <WeekEventChip key={`${event.id}-${day.date.toISOString()}`} ev={event} now={now} onPrepMeeting={onPrepMeeting} />
                     ))}
                   </div>
                 ) : day.allDay.length === 0 ? (
@@ -367,7 +422,7 @@ export function CalendarView() {
               <line x1="8" y1="2" x2="8" y2="6" />
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
-            Today
+            {dayLabel}
           </h2>
 
           {todayBucket.allDay.map((ev) => (
@@ -388,7 +443,7 @@ export function CalendarView() {
             {todayBucket.timed.map((ev, i) => (
               <div key={ev.id}>
                 {i === nowInsertBefore && <NowMarker />}
-                <EventCard ev={ev} now={now} />
+                <EventCard ev={ev} now={now} onPrepMeeting={onPrepMeeting} />
               </div>
             ))}
             {nowInsertBefore === todayBucket.timed.length && todayBucket.timed.length > 0 && <NowMarker />}
@@ -398,7 +453,7 @@ export function CalendarView() {
         <WeatherCard />
       </div>
 
-      <MeetingPrep meetings={meetingPrep} />
+      <MeetingPrep meetings={meetingPrep} onPrepMeeting={onPrepMeeting} />
     </div>
   );
 }

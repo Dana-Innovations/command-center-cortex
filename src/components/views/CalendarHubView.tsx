@@ -13,6 +13,7 @@ interface CalendarHubViewProps {
   activeSubView: CalendarSubView;
   initialEventId?: string;
   onConnectService: (provider: string) => Promise<void>;
+  onOpenCalendarPrep?: (eventId?: string) => void;
   onOpenSetup?: () => void;
   onSubViewChange: (subView: CalendarSubView) => void;
 }
@@ -21,6 +22,7 @@ export function CalendarHubView({
   activeSubView,
   initialEventId,
   onConnectService,
+  onOpenCalendarPrep,
   onOpenSetup,
   onSubViewChange,
 }: CalendarHubViewProps) {
@@ -74,7 +76,7 @@ export function CalendarHubView({
       ) : activeSubView === "prep" ? (
         <MeetingPrepView initialEventId={initialEventId} />
       ) : (
-        <CalendarView />
+        <CalendarView onPrepMeeting={onOpenCalendarPrep ? (id: string) => onOpenCalendarPrep(id) : undefined} />
       )}
     </div>
   );
