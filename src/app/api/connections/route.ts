@@ -54,6 +54,17 @@ export async function POST(request: NextRequest) {
 
   const result = await initiateConnect(cortexToken, provider);
   if (!result) {
+    // Check if already connected — Cortex may reject re-initiation
+    const connections = await getConnections(cortexToken);
+    const svc = REQUIRED_SERVICES.find((s) => s.provider === provider);
+    const alreadyConnected = connections.some(
+      (c) =>
+        (svc && (matchesConnectionName(c, svc.mcp_name) || matchesConnectionName(c, svc.provider))) &&
+        c.connected
+    );
+    if (alreadyConnected) {
+      return NextResponse.json({ already_connected: true });
+    }
     return NextResponse.json(
       { error: "Failed to initiate connection" },
       { status: 500 }

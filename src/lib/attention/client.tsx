@@ -450,14 +450,21 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
       setConnectingService(provider);
 
       try {
-        const data = await fetchJson<{ authorization_url?: string }>(
-          "/api/connections",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ provider }),
-          }
-        );
+        const data = await fetchJson<{
+          authorization_url?: string;
+          already_connected?: boolean;
+        }>("/api/connections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider }),
+        });
+
+        if (data.already_connected) {
+          addToast(`${serviceLabel} is already connected.`, "success");
+          await refreshServices();
+          await refreshFocusMap();
+          return true;
+        }
 
         if (!data.authorization_url) {
           addToast("No authorization URL was returned for this connection.", "error");

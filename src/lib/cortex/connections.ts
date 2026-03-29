@@ -175,11 +175,25 @@ export async function initiateConnect(
           "Content-Type": "application/json",
           Authorization: `Bearer ${cortexToken}`,
         },
+        redirect: "follow",
       }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(
+        `[initiateConnect] ${provider} failed: ${res.status} ${res.statusText}`,
+        body
+      );
+      // Try to parse body — some Cortex responses return the URL even on non-200
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed.authorization_url) return parsed;
+      } catch {}
+      return null;
+    }
     return res.json();
-  } catch {
+  } catch (err) {
+    console.error(`[initiateConnect] ${provider} exception:`, err);
     return null;
   }
 }
