@@ -46,6 +46,9 @@ export interface ReplyQueueItem {
   tags: string[];
   meta: string;
   projectName?: string;
+  chatId?: string;
+  channelId?: string;
+  threadTs?: string;
   sortTime: number;
   score: number;
   displayScore: number;
@@ -941,6 +944,7 @@ export function buildReplyQueue({
     items.push({
       id: `teams:${chat.id}`,
       source: "teams",
+      chatId: chat.chat_id || chat.id,
       attentionTarget: buildTeamsChatAttentionTarget(
         chat,
         "reply-center",
@@ -988,6 +992,8 @@ export function buildReplyQueue({
     items.push({
       id: `slack:${message.id}`,
       source: "slack_context",
+      channelId: message.channel_id || undefined,
+      threadTs: message.message_ts || undefined,
       attentionTarget: buildSlackAttentionTarget(
         message,
         "reply-center",
