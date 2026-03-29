@@ -50,6 +50,7 @@ export type CommunicationCardItem = {
   id: string;
   kind: "email" | "chat" | "slack" | "asana";
   subKind: "dm" | "group-chat" | "channel" | "thread" | null;
+  tier: "act-now" | "follow-up" | "aware";
   title: string;
   meta: string;
   preview: string;
@@ -60,6 +61,15 @@ export type CommunicationCardItem = {
 };
 
 /* ─── Helpers ─── */
+
+function assignTier(score: number, timestamp: number): CommunicationCardItem["tier"] {
+  if (score >= 70) return "act-now";
+  if (score >= 45) return "follow-up";
+  // Aging items (> 24h old) get promoted to follow-up
+  const ageMs = Date.now() - timestamp;
+  if (ageMs > 24 * 60 * 60 * 1000) return "follow-up";
+  return "aware";
+}
 
 const urgencyOrder = { red: 0, amber: 1, teal: 2, gray: 3 };
 
@@ -222,6 +232,7 @@ export function useHomeData() {
           id: `email-${email.id}`,
           kind: "email",
           subKind: null,
+          tier: assignTier(attention.finalScore, new Date(email.received_at).getTime()),
           title: email.subject || "(no subject)",
           meta: `${email.from_name || email.from_email} · ${formatDay(email.received_at)}`,
           preview: email.preview,
@@ -240,6 +251,7 @@ export function useHomeData() {
         id: `chat-${chat.id}`,
         kind: "chat",
         subKind: chat.chat_type === "oneOnOne" || chat.members.length <= 2 ? "dm" : "group-chat",
+        tier: assignTier(attention.finalScore, new Date(chat.last_activity).getTime()),
         title: chat.topic || "Teams Chat",
         meta: `${chat.last_message_from || "Teams"} · ${formatDay(chat.last_activity)}`,
         preview: chat.last_message_preview,
@@ -258,6 +270,7 @@ export function useHomeData() {
         id: `slack-${msg.id}`,
         kind: "slack",
         subKind: null,
+        tier: assignTier(attention.finalScore, new Date(msg.timestamp).getTime()),
         title: `#${msg.channel_name}`,
         meta: `${msg.author_name} · ${formatDay(msg.timestamp)}`,
         preview: msg.text || "Slack activity",
@@ -276,6 +289,7 @@ export function useHomeData() {
         id: `asana-${comment.id}`,
         kind: "asana",
         subKind: "thread",
+        tier: assignTier(attention.finalScore, new Date(comment.latest_comment_at).getTime()),
         title: comment.task_name,
         meta: `${comment.latest_commenter_name} · ${formatDay(comment.latest_comment_at)}`,
         preview: comment.latest_comment_text,
@@ -286,7 +300,7 @@ export function useHomeData() {
       });
     });
 
-    return next.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp).slice(0, 6);
+    return next.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp).slice(0, 10);
   }, [applyTarget, chats, comments, emails, slackMessages]);
 
   /* ── Hero items (top 3 urgent across all sources) ── */
