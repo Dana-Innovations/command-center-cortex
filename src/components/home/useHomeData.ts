@@ -49,6 +49,7 @@ export interface QuickAction {
 export type CommunicationCardItem = {
   id: string;
   kind: "email" | "chat" | "slack" | "asana";
+  subKind: "dm" | "group-chat" | "channel" | "thread" | null;
   title: string;
   meta: string;
   preview: string;
@@ -220,6 +221,7 @@ export function useHomeData() {
         next.push({
           id: `email-${email.id}`,
           kind: "email",
+          subKind: null,
           title: email.subject || "(no subject)",
           meta: `${email.from_name || email.from_email} · ${formatDay(email.received_at)}`,
           preview: email.preview,
@@ -237,6 +239,7 @@ export function useHomeData() {
       next.push({
         id: `chat-${chat.id}`,
         kind: "chat",
+        subKind: chat.chat_type === "oneOnOne" || chat.members.length <= 2 ? "dm" : "group-chat",
         title: chat.topic || "Teams Chat",
         meta: `${chat.last_message_from || "Teams"} · ${formatDay(chat.last_activity)}`,
         preview: chat.last_message_preview,
@@ -254,6 +257,7 @@ export function useHomeData() {
       next.push({
         id: `slack-${msg.id}`,
         kind: "slack",
+        subKind: null,
         title: `#${msg.channel_name}`,
         meta: `${msg.author_name} · ${formatDay(msg.timestamp)}`,
         preview: msg.text || "Slack activity",
@@ -271,6 +275,7 @@ export function useHomeData() {
       next.push({
         id: `asana-${comment.id}`,
         kind: "asana",
+        subKind: "thread",
         title: comment.task_name,
         meta: `${comment.latest_commenter_name} · ${formatDay(comment.latest_comment_at)}`,
         preview: comment.latest_comment_text,
