@@ -62,6 +62,7 @@ export function HomeView({
       return typeof window !== "undefined" && localStorage.getItem("cc-onboarding-completed") === "true";
     } catch { return false; }
   });
+  const [revealing, setRevealing] = useState(false);
 
   const onboardingStep: OnboardingStep | null = onboardingCompleted
     ? null
@@ -76,8 +77,12 @@ export function HomeView({
   useEffect(() => {
     if (onboardingStep === "syncing" && data.hasAnyService) {
       const timer = setTimeout(() => {
-        try { localStorage.setItem("cc-onboarding-completed", "true"); } catch {}
-        setOnboardingCompleted(true);
+        setRevealing(true);
+        setTimeout(() => {
+          try { localStorage.setItem("cc-onboarding-completed", "true"); } catch {}
+          setOnboardingCompleted(true);
+          setRevealing(false);
+        }, 400);
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -128,7 +133,12 @@ export function HomeView({
   if (onboardingStep !== null) {
     return (
       <div className="space-y-5">
-        <section className="glass-card anim-card overflow-hidden" style={{ animationDelay: "0ms" }}>
+        <section
+          className={`glass-card anim-card overflow-hidden transition-opacity duration-300 ${
+            revealing ? "opacity-0" : "opacity-100"
+          }`}
+          style={{ animationDelay: "0ms" }}
+        >
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,163,225,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(0,178,169,0.12),transparent_32%)]" />
           <div className="relative">
             {onboardingStep === "welcome" && (
