@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { streamText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { getWritingStyle } from "@/lib/constants";
@@ -10,6 +10,7 @@ import {
   buildRelationshipDossier,
   serializeDossierForPrompt,
 } from "@/lib/relationship-dossier";
+import { fetchVaultPage } from "@/lib/vault-client";
 
 function trimForModel(value: string, max = 6000): string {
   const trimmed = value.trim();
@@ -17,12 +18,38 @@ function trimForModel(value: string, max = 6000): string {
   return `${trimmed.slice(0, max).trimEnd()}\n\n[truncated]`;
 }
 
+function isWeekend(): boolean {
+  const day = new Date().getDay();
+  return day === 0 || day === 6;
+}
+
+function pickFormalityGuidance(
+  channel: string,
+  relevanceTier: string
+): string {
+  if (channel === "teams" || channel === "slack" || channel === "slack context") {
+    return "Use Level 8 (Teams Chat) from the Writing Style Guide: most casual, stream of consciousness, often lowercase, periods optional, short fragments. No sign-off.";
+  }
+  if (channel === "asana") {
+    return "Use Level 5 (Quick Operational) from the Writing Style Guide: ultra-brief, action-oriented, no pleasantries needed. Start with the action or decision.";
+  }
+  // Email — pick by relationship
+  if (relevanceTier === "vip") {
+    return "Use Level 3 (Internal Leadership / SLT) from the Writing Style Guide: direct, collaborative, sometimes stream-of-consciousness. Short paragraphs. Sign off with just the name or 'Thanks'.";
+  }
+  if (relevanceTier === "occasional" || relevanceTier === "new" || relevanceTier === "unknown") {
+    return "Use Level 2 (Professional External) from the Writing Style Guide: professional, direct, shows homework done. Clear asks, often numbered. Sign off with 'Thanks!' and first name.";
+  }
+  // active tier or default
+  return "Use Level 3 (Internal Leadership) from the Writing Style Guide: direct, collaborative, clear next steps. Sign off simply.";
+}
+
 export async function POST(request: NextRequest) {
   let body;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   const prompt = String(body.prompt ?? "").trim();
@@ -30,14 +57,14 @@ export async function POST(request: NextRequest) {
   const messageId = String(body.messageId ?? "").trim();
 
   if (!prompt || !channel) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Missing required fields: prompt, channel" },
       { status: 400 }
     );
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
+    return Response.json(
       { error: "ANTHROPIC_API_KEY not configured" },
       { status: 500 }
     );
@@ -48,9 +75,10 @@ export async function POST(request: NextRequest) {
   let resolvedSubject = String(body.subject ?? "").trim();
   let earlierContext = "";
 
+  // Channel-specific context enrichment
   if (channel === "email") {
     if (!messageId) {
-      return NextResponse.json(
+      return Response.json(
         { error: "messageId is required for email drafts" },
         { status: 400 }
       );
@@ -58,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     const cortexToken = getCortexToken(request);
     if (!cortexToken) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const sessionId = await cortexInit(cortexToken);
@@ -77,8 +105,10 @@ export async function POST(request: NextRequest) {
     earlierContext = email.earlierThreadText || "";
   }
 
-  if (!resolvedMessage || !resolvedSender || !resolvedSubject) {
-    return NextResponse.json(
+  // Teams, Slack, Asana: use provided message (already in ReplyQueueItem.message)
+
+  if (!resolvedMessage || !resolvedSender) {
+    return Response.json(
       { error: "Unable to resolve message context for draft" },
       { status: 400 }
     );
@@ -87,8 +117,26 @@ export async function POST(request: NextRequest) {
   const signedInUser = await getCortexUserFromRequest(request);
   const isAri = signedInUser?.email.toLowerCase() === "ari@sonance.com";
 
+  // Fetch Writing Style Guide from Vault (for Ari) or fall back to hardcoded
+  let writingStyle = getWritingStyle(isAri);
+  if (isAri) {
+    const vaultStyle = await fetchVaultPage("Writing Style", "personal/preferences");
+    if (vaultStyle) {
+      writingStyle = vaultStyle;
+    }
+
+    // Append weekend tone if applicable
+    if (isWeekend()) {
+      const weekendTone = await fetchVaultPage("Weekend Tone", "personal/preferences");
+      if (weekendTone) {
+        writingStyle += `\n\n## Weekend Override\n${weekendTone}`;
+      }
+    }
+  }
+
   // Enrich with sender relationship context
   let relationshipContext = "";
+  let relevanceTier = "unknown";
   if (signedInUser && resolvedSender) {
     try {
       const supabase = createServiceClient();
@@ -99,13 +147,18 @@ export async function POST(request: NextRequest) {
       });
       if (dossier.relevanceTier !== "unknown") {
         relationshipContext = serializeDossierForPrompt(dossier);
+        relevanceTier = dossier.relevanceTier;
       }
     } catch (e) {
       console.warn("[draft-reply] dossier enrichment failed:", e);
     }
   }
 
-  const systemPrompt = `${getWritingStyle(isAri)}
+  const formalityGuidance = pickFormalityGuidance(channel, relevanceTier);
+
+  const systemPrompt = `${writingStyle}
+
+${formalityGuidance}
 
 You are drafting a reply to a ${channel} message.
 Reply as the signed-in user. Ground the reply in the actual message content and the user's guidance.
@@ -128,7 +181,7 @@ Output only the reply body. No subject line. No explanation.`;
         {
           role: "user",
           content: [
-            `Incoming ${channel} subject: ${resolvedSubject}`,
+            `Incoming ${channel} ${resolvedSubject ? `subject: ${resolvedSubject}` : "message"}`,
             `From: ${resolvedSender}`,
             relationshipSection,
             "Latest message to reply to:",
@@ -145,17 +198,10 @@ Output only the reply body. No subject line. No explanation.`;
       maxOutputTokens: 500,
     });
 
-    const text = await result.text;
-    if (!text.trim()) {
-      return NextResponse.json({ error: "Empty response from AI" }, { status: 502 });
-    }
-
-    return new Response(text, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
+    return result.toTextStreamResponse();
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
