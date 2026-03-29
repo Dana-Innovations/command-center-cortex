@@ -17,9 +17,19 @@ import {
   ONBOARDING_HIGHLIGHTS,
   useOnboardingHighlights,
 } from "@/components/home/OnboardingHighlights";
+import { FocusDragSort, type FocusResource } from "@/components/home/FocusDragSort";
+import { FocusExceptions } from "@/components/home/FocusExceptions";
 import type { SetupFocusTab, TabId } from "@/lib/tab-config";
 
-type OnboardingStep = "welcome" | "connect-asana" | "syncing";
+type OnboardingStep =
+  | "welcome"
+  | "sort-m365"
+  | "exceptions-m365"
+  | "connect-asana"
+  | "sort-asana"
+  | "exceptions-asana"
+  | "global-rules"
+  | "syncing";
 
 const VALUE_PROPS = [
   { icon: "\u{1F4C8}", label: "Prioritized", desc: "What matters surfaces first" },
@@ -68,6 +78,7 @@ export function HomeView({
     } catch { return false; }
   });
   const [revealing, setRevealing] = useState(false);
+  const [focusResources, setFocusResources] = useState<FocusResource[]>([]);
 
   const onboardingStep: OnboardingStep | null = onboardingCompleted
     ? null
@@ -93,27 +104,110 @@ export function HomeView({
     }
   }, [onboardingStep, data.hasAnyService]);
 
+  const fetchFocusResources = useCallback(async (provider: string) => {
+    try {
+      const res = await fetch("/api/focus/map");
+      if (!res.ok) return;
+      const data = await res.json();
+      const providerNode = data.tree?.children?.find(
+        (node: { provider?: string }) => node.provider === provider
+      );
+      if (!providerNode?.children) return;
+      const resources: FocusResource[] = providerNode.children
+        .filter((node: { id?: string; label?: string }) => node.id && node.label)
+        .map((node: { id: string; label: string }, index: number) => ({
+          id: node.id,
+          name: node.label,
+          provider,
+          activityHint: "",
+          suggestedTier: (index < 3 ? "important" : "background") as "important" | "background",
+        }));
+      setFocusResources(resources);
+    } catch {
+      // If focus map fails, skip sort step
+    }
+  }, []);
+
   const handleConnectM365 = useCallback(async () => {
     try {
       await onConnectService("microsoft");
-      setManualStep("connect-asana");
+      await fetchFocusResources("microsoft");
+      setManualStep("sort-m365");
     } catch {
       // Stay on current step
     }
-  }, [onConnectService]);
+  }, [onConnectService, fetchFocusResources]);
 
   const handleConnectAsana = useCallback(async () => {
     try {
       await onConnectService("asana");
-      setManualStep("syncing");
+      await fetchFocusResources("asana");
+      setManualStep("sort-asana");
     } catch {
       // Stay on current step
     }
-  }, [onConnectService]);
+  }, [onConnectService, fetchFocusResources]);
 
   const handleSkipAsana = useCallback(() => {
     setManualStep("syncing");
   }, []);
+
+  const handleSaveFocusSort = useCallback(
+    async (important: FocusResource[], background: FocusResource[]) => {
+      const focusUpserts = [
+        ...important.map((r) => ({
+          provider: r.provider,
+          entity_type: "project",
+          entity_id: r.id,
+          label_snapshot: r.name,
+          importance: "critical" as const,
+        })),
+        ...background.map((r) => ({
+          provider: r.provider,
+          entity_type: "project",
+          entity_id: r.id,
+          label_snapshot: r.name,
+          importance: "quiet" as const,
+        })),
+      ];
+      try {
+        await fetch("/api/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ focusUpserts }),
+        });
+      } catch {}
+
+      if (onboardingStep === "sort-m365") setManualStep("exceptions-m365");
+      else if (onboardingStep === "sort-asana") setManualStep("exceptions-asana");
+    },
+    [onboardingStep]
+  );
+
+  const handleSaveExceptions = useCallback(
+    async (rules: Array<{
+      provider: string | null;
+      entity_id: string | null;
+      entity_name: string | null;
+      condition_type: string;
+      condition_value: string;
+      override_tier: string;
+    }>) => {
+      if (rules.length > 0) {
+        try {
+          await fetch("/api/focus/exceptions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rules }),
+          });
+        } catch {}
+      }
+      if (onboardingStep === "exceptions-m365") setManualStep("connect-asana");
+      else if (onboardingStep === "exceptions-asana") setManualStep("global-rules");
+      else if (onboardingStep === "global-rules") setManualStep("syncing");
+    },
+    [onboardingStep]
+  );
 
   const highlights = useOnboardingHighlights();
 
@@ -187,6 +281,46 @@ export function HomeView({
               </>
             )}
 
+            {onboardingStep === "sort-m365" && (
+              <>
+                <StepDots current={2} />
+                <div className="mb-4 inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
+                  <span className="text-accent-green">&#10003;</span>
+                  <span className="text-xs text-accent-green">Microsoft 365 connected</span>
+                </div>
+                <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
+                  What matters most in Outlook &amp; Teams?
+                </h1>
+                <div className="mt-4">
+                  <FocusDragSort
+                    provider="microsoft"
+                    providerLabel="Microsoft 365"
+                    resources={focusResources}
+                    onSave={handleSaveFocusSort}
+                    onSkip={() => setManualStep("exceptions-m365")}
+                  />
+                </div>
+              </>
+            )}
+
+            {onboardingStep === "exceptions-m365" && (
+              <>
+                <StepDots current={2} />
+                <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
+                  Any exceptions for Microsoft 365?
+                </h1>
+                <div className="mt-4">
+                  <FocusExceptions
+                    provider="microsoft"
+                    providerLabel="Microsoft 365"
+                    resources={focusResources.map((r) => ({ id: r.id, name: r.name }))}
+                    onSave={handleSaveExceptions}
+                    onSkip={() => setManualStep("connect-asana")}
+                  />
+                </div>
+              </>
+            )}
+
             {onboardingStep === "connect-asana" && (
               <>
                 <StepDots current={2} />
@@ -215,6 +349,70 @@ export function HomeView({
                   >
                     Skip for now
                   </button>
+                </div>
+              </>
+            )}
+
+            {onboardingStep === "sort-asana" && (
+              <>
+                <StepDots current={3} />
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
+                    <span className="text-accent-green">&#10003;</span>
+                    <span className="text-xs text-accent-green">Microsoft 365</span>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
+                    <span className="text-accent-green">&#10003;</span>
+                    <span className="text-xs text-accent-green">Asana</span>
+                  </div>
+                </div>
+                <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
+                  Which Asana projects matter most?
+                </h1>
+                <div className="mt-4">
+                  <FocusDragSort
+                    provider="asana"
+                    providerLabel="Asana"
+                    resources={focusResources}
+                    onSave={handleSaveFocusSort}
+                    onSkip={() => setManualStep("exceptions-asana")}
+                  />
+                </div>
+              </>
+            )}
+
+            {onboardingStep === "exceptions-asana" && (
+              <>
+                <StepDots current={3} />
+                <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
+                  Any exceptions for Asana?
+                </h1>
+                <div className="mt-4">
+                  <FocusExceptions
+                    provider="asana"
+                    providerLabel="Asana"
+                    resources={focusResources.map((r) => ({ id: r.id, name: r.name }))}
+                    onSave={handleSaveExceptions}
+                    onSkip={() => setManualStep("global-rules")}
+                  />
+                </div>
+              </>
+            )}
+
+            {onboardingStep === "global-rules" && (
+              <>
+                <StepDots current={3} />
+                <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
+                  Any rules across all your tools?
+                </h1>
+                <p className="mt-2 text-sm text-text-muted">
+                  Rules that apply everywhere — about people, topics, or patterns.
+                </p>
+                <div className="mt-4">
+                  <FocusExceptions
+                    onSave={handleSaveExceptions}
+                    onSkip={() => setManualStep("syncing")}
+                  />
                 </div>
               </>
             )}
