@@ -195,6 +195,11 @@ body {
 }
 .flash-pulse { animation: pulse 1.5s ease-in-out infinite; }
 
+@keyframes onboardingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.8); opacity: 0; }
+}
+
 /* Hot links */
 .hot-link {
   color: var(--link-color);

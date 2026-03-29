@@ -12,6 +12,11 @@ import { HomePeople } from "@/components/home/HomePeople";
 import { HomeWatchlist } from "@/components/home/HomeWatchlist";
 import { useHomeData, type QuickAction } from "@/components/home/useHomeData";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  OnboardingHighlight,
+  ONBOARDING_HIGHLIGHTS,
+  useOnboardingHighlights,
+} from "@/components/home/OnboardingHighlights";
 import type { SetupFocusTab, TabId } from "@/lib/tab-config";
 
 type OnboardingStep = "welcome" | "connect-asana" | "syncing";
@@ -109,6 +114,8 @@ export function HomeView({
   const handleSkipAsana = useCallback(() => {
     setManualStep("syncing");
   }, []);
+
+  const highlights = useOnboardingHighlights();
 
   const handleQuickAction = useCallback(
     (action: QuickAction) => {
@@ -250,16 +257,40 @@ export function HomeView({
   return (
     <div className="space-y-4">
       {/* 1. Attention Hero — top 1-3 urgent items */}
-      <AttentionHero items={data.heroItems} onAction={handleQuickAction} />
+      <div className="relative">
+        <OnboardingHighlight
+          id="attention-hero"
+          label={ONBOARDING_HIGHLIGHTS[0].label}
+          dismissed={highlights.dismissed.has("attention-hero")}
+          onDismiss={() => highlights.dismiss("attention-hero")}
+        />
+        <AttentionHero items={data.heroItems} onAction={handleQuickAction} />
+      </div>
 
       {/* 2. Quick action buttons */}
-      <QuickActions actions={data.quickActions} onAction={handleQuickAction} />
+      <div className="relative">
+        <OnboardingHighlight
+          id="quick-actions"
+          label={ONBOARDING_HIGHLIGHTS[2].label}
+          dismissed={highlights.dismissed.has("quick-actions")}
+          onDismiss={() => highlights.dismiss("quick-actions")}
+        />
+        <QuickActions actions={data.quickActions} onAction={handleQuickAction} />
+      </div>
 
       {/* 3. Morning Brief (collapsed by default) */}
-      <MorningBrief
-        onOpenCalendarPrep={onOpenCalendarPrep}
-        showPendingState={recentlyConnectedProvider === "microsoft" && isSyncingLiveData}
-      />
+      <div className="relative">
+        <OnboardingHighlight
+          id="morning-brief"
+          label={ONBOARDING_HIGHLIGHTS[1].label}
+          dismissed={highlights.dismissed.has("morning-brief")}
+          onDismiss={() => highlights.dismiss("morning-brief")}
+        />
+        <MorningBrief
+          onOpenCalendarPrep={onOpenCalendarPrep}
+          showPendingState={recentlyConnectedProvider === "microsoft" && isSyncingLiveData}
+        />
+      </div>
 
       {/* 4. Collapsible sections — progressive disclosure */}
       <HomeCalendar
