@@ -21,6 +21,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { ServiceIcon } from "@/components/ui/ServiceIcon";
 import { Button } from "@/components/ui/button";
 
+const DROPPABLE = { important: "important-droppable", background: "background-droppable" } as const;
+
 export interface FocusResource {
   id: string;
   name: string;
@@ -137,9 +139,9 @@ export function FocusDragSort({
       const overContainer = findContainer(String(over.id));
 
       const targetContainer =
-        String(over.id) === "important-droppable"
+        String(over.id) === DROPPABLE.important
           ? "important"
-          : String(over.id) === "background-droppable"
+          : String(over.id) === DROPPABLE.background
             ? "background"
             : overContainer;
 
@@ -184,7 +186,7 @@ export function FocusDragSort({
       >
         <div className="grid grid-cols-2 gap-4">
           <div
-            id="important-droppable"
+            id={DROPPABLE.important}
             className="rounded-2xl border-2 border-dashed border-accent-amber/25 p-3 min-h-[200px]"
           >
             <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent-amber mb-3">
@@ -207,7 +209,7 @@ export function FocusDragSort({
           </div>
 
           <div
-            id="background-droppable"
+            id={DROPPABLE.background}
             className="rounded-2xl border-2 border-dashed border-white/8 p-3 min-h-[200px]"
           >
             <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-text-muted mb-3">

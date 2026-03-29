@@ -37,6 +37,15 @@ const VALUE_PROPS = [
   { icon: "\u26A1", label: "Actionable", desc: "Act without switching apps" },
 ] as const;
 
+function ConnectedBadge({ label }: { label: string }) {
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
+      <span className="text-accent-green">&#10003;</span>
+      <span className="text-xs text-accent-green">{label}</span>
+    </div>
+  );
+}
+
 const StepDots = ({ current }: { current: 1 | 2 | 3 }) => (
   <div className="flex gap-1.5 mb-5">
     {[1, 2, 3].map((i) => (
@@ -128,25 +137,18 @@ export function HomeView({
     }
   }, []);
 
-  const handleConnectM365 = useCallback(async () => {
-    try {
-      await onConnectService("microsoft");
-      await fetchFocusResources("microsoft");
-      setManualStep("sort-m365");
-    } catch {
-      // Stay on current step
-    }
-  }, [onConnectService, fetchFocusResources]);
-
-  const handleConnectAsana = useCallback(async () => {
-    try {
-      await onConnectService("asana");
-      await fetchFocusResources("asana");
-      setManualStep("sort-asana");
-    } catch {
-      // Stay on current step
-    }
-  }, [onConnectService, fetchFocusResources]);
+  const handleConnectProvider = useCallback(
+    async (provider: string, sortStep: OnboardingStep) => {
+      try {
+        await onConnectService(provider);
+        await fetchFocusResources(provider);
+        setManualStep(sortStep);
+      } catch {
+        // Stay on current step
+      }
+    },
+    [onConnectService, fetchFocusResources]
+  );
 
   const handleSkipAsana = useCallback(() => {
     setManualStep("syncing");
@@ -272,7 +274,7 @@ export function HomeView({
                     variant="primary"
                     size="sm"
                     disabled={data.connectingService === "microsoft"}
-                    onClick={() => void handleConnectM365()}
+                    onClick={() => void handleConnectProvider("microsoft", "sort-m365")}
                   >
                     {data.connectingService === "microsoft" ? "Connecting..." : "Connect Microsoft 365"}
                   </Button>
@@ -284,9 +286,8 @@ export function HomeView({
             {onboardingStep === "sort-m365" && (
               <>
                 <StepDots current={2} />
-                <div className="mb-4 inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                  <span className="text-accent-green">&#10003;</span>
-                  <span className="text-xs text-accent-green">Microsoft 365 connected</span>
+                <div className="mb-4">
+                  <ConnectedBadge label="Microsoft 365 connected" />
                 </div>
                 <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
                   What matters most in Outlook &amp; Teams?
@@ -324,9 +325,8 @@ export function HomeView({
             {onboardingStep === "connect-asana" && (
               <>
                 <StepDots current={2} />
-                <div className="mb-4 inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                  <span className="text-accent-green">&#10003;</span>
-                  <span className="text-xs text-accent-green">Microsoft 365 connected</span>
+                <div className="mb-4">
+                  <ConnectedBadge label="Microsoft 365 connected" />
                 </div>
                 <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
                   Add Asana for task context.
@@ -339,7 +339,7 @@ export function HomeView({
                     variant="primary"
                     size="sm"
                     disabled={data.connectingService === "asana"}
-                    onClick={() => void handleConnectAsana()}
+                    onClick={() => void handleConnectProvider("asana", "sort-asana")}
                   >
                     {data.connectingService === "asana" ? "Connecting..." : "Connect Asana"}
                   </Button>
@@ -357,14 +357,8 @@ export function HomeView({
               <>
                 <StepDots current={3} />
                 <div className="mb-4 flex flex-wrap gap-2">
-                  <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                    <span className="text-accent-green">&#10003;</span>
-                    <span className="text-xs text-accent-green">Microsoft 365</span>
-                  </div>
-                  <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                    <span className="text-accent-green">&#10003;</span>
-                    <span className="text-xs text-accent-green">Asana</span>
-                  </div>
+                  <ConnectedBadge label="Microsoft 365" />
+                  <ConnectedBadge label="Asana" />
                 </div>
                 <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
                   Which Asana projects matter most?
@@ -421,18 +415,8 @@ export function HomeView({
               <>
                 <StepDots current={3} />
                 <div className="mb-4 flex flex-wrap gap-2">
-                  {data.hasM365 && (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                      <span className="text-accent-green">&#10003;</span>
-                      <span className="text-xs text-accent-green">Microsoft 365</span>
-                    </div>
-                  )}
-                  {data.hasAsana && (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/25 bg-accent-green/10 px-2.5 py-1">
-                      <span className="text-accent-green">&#10003;</span>
-                      <span className="text-xs text-accent-green">Asana</span>
-                    </div>
-                  )}
+                  {data.hasM365 && <ConnectedBadge label="Microsoft 365" />}
+                  {data.hasAsana && <ConnectedBadge label="Asana" />}
                 </div>
                 <h1 className="font-display text-[22px] font-semibold leading-tight text-text-heading">
                   Syncing your data...

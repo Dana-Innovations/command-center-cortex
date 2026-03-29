@@ -194,10 +194,16 @@ export function CalendarView({ onPrepMeeting }: CalendarViewProps) {
 
   const [weekOffset, setWeekOffset] = useState(0);
 
+  const today = useMemo(() => {
+    const n = now;
+    return `${n.getFullYear()}-${n.getMonth()}-${n.getDate()}`;
+  }, [now]);
+
   const weekStart = useMemo(() => {
     const base = startOfWeek(now);
     return addDays(base, weekOffset * 7);
-  }, [now, weekOffset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [today, weekOffset]);
 
   const sortedEvents = useMemo(() => {
     return [...calEvents]

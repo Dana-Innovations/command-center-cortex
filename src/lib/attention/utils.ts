@@ -352,30 +352,29 @@ function checkExceptionRules(
   target: AttentionTarget,
   rules: FocusExceptionRule[]
 ): ImportanceTier | null {
+  if (rules.length === 0) return null;
+
+  const searchText = [target.title, ...target.topicKeys].join(" ").toLowerCase();
+  const actorKeysLower = target.actorKeys.map((k) => k.toLowerCase());
+
   for (const rule of rules) {
-    // Provider filter
     if (rule.provider && target.provider !== rule.provider) continue;
-    // Entity filter
     if (rule.entity_id && !target.resourceKeys.some((k) => k.includes(rule.entity_id!))) continue;
 
-    // Build searchable text from target
-    const searchText = [target.title, ...target.topicKeys].join(" ").toLowerCase();
-    const conditionValue = rule.condition_value.toLowerCase();
-
+    const cv = rule.condition_value.toLowerCase();
     let matches = false;
+
     switch (rule.condition_type) {
       case "topic":
       case "keyword":
-        matches = searchText.includes(conditionValue);
+      case "label":
+        matches = searchText.includes(cv);
         break;
       case "sender":
-        matches = target.actorKeys.some((k) => k.toLowerCase().includes(conditionValue));
-        break;
-      case "label":
-        matches = searchText.includes(conditionValue);
+        matches = actorKeysLower.some((k) => k.includes(cv));
         break;
       case "mention":
-        matches = searchText.includes(conditionValue);
+        matches = searchText.includes(cv);
         break;
     }
 
