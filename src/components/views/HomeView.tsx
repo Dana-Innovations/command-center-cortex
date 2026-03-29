@@ -22,6 +22,19 @@ const VALUE_PROPS = [
   { icon: "\u26A1", label: "Actionable", desc: "Act without switching apps" },
 ] as const;
 
+const StepDots = ({ current }: { current: 1 | 2 | 3 }) => (
+  <div className="flex gap-1.5 mb-5">
+    {[1, 2, 3].map((i) => (
+      <div
+        key={i}
+        className={`h-[3px] w-7 rounded-full transition-colors duration-300 ${
+          i < current ? "bg-accent-green" : i === current ? "bg-blue-500" : "bg-white/10"
+        }`}
+      />
+    ))}
+  </div>
+);
+
 interface HomeViewProps {
   onNavigate: (tab: TabId) => void;
   onOpenCalendarPrep: (eventId?: string) => void;
@@ -43,39 +56,53 @@ export function HomeView({
   const { user } = useAuth();
   const userName = user?.user_metadata?.full_name?.split(" ")[0] ?? "";
 
-  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
-    () => {
-      try {
-        if (typeof window !== "undefined" && localStorage.getItem("cc-onboarding-completed") === "true") return null;
-      } catch {}
-      if (!data.hasM365) return "welcome";
-      if (!data.hasAsana) return "connect-asana";
-      return null;
-    }
-  );
+  const [manualStep, setManualStep] = useState<OnboardingStep | null>(null);
+  const [onboardingCompleted, setOnboardingCompleted] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("cc-onboarding-completed") === "true";
+    } catch { return false; }
+  });
+
+  const onboardingStep: OnboardingStep | null = onboardingCompleted
+    ? null
+    : manualStep !== null
+      ? manualStep
+      : !data.hasM365
+        ? "welcome"
+        : !data.hasAsana
+          ? "connect-asana"
+          : null;
 
   useEffect(() => {
     if (onboardingStep === "syncing" && data.hasAnyService) {
       const timer = setTimeout(() => {
         try { localStorage.setItem("cc-onboarding-completed", "true"); } catch {}
-        setOnboardingStep(null);
+        setOnboardingCompleted(true);
       }, 2500);
       return () => clearTimeout(timer);
     }
   }, [onboardingStep, data.hasAnyService]);
 
   const handleConnectM365 = useCallback(async () => {
-    await onConnectService("microsoft");
-    setOnboardingStep("connect-asana");
+    try {
+      await onConnectService("microsoft");
+      setManualStep("connect-asana");
+    } catch {
+      // Stay on current step
+    }
   }, [onConnectService]);
 
   const handleConnectAsana = useCallback(async () => {
-    await onConnectService("asana");
-    setOnboardingStep("syncing");
+    try {
+      await onConnectService("asana");
+      setManualStep("syncing");
+    } catch {
+      // Stay on current step
+    }
   }, [onConnectService]);
 
   const handleSkipAsana = useCallback(() => {
-    setOnboardingStep("syncing");
+    setManualStep("syncing");
   }, []);
 
   const handleQuickAction = useCallback(
@@ -96,19 +123,6 @@ export function HomeView({
       }
     },
     [onNavigate, onOpenCalendarPrep, onOpenSetup]
-  );
-
-  const StepDots = ({ current }: { current: 1 | 2 | 3 }) => (
-    <div className="flex gap-1.5 mb-5">
-      {[1, 2, 3].map((i) => (
-        <div
-          key={i}
-          className={`h-[3px] w-7 rounded-full transition-colors duration-300 ${
-            i < current ? "bg-accent-green" : i === current ? "bg-blue-500" : "bg-white/10"
-          }`}
-        />
-      ))}
-    </div>
   );
 
   if (onboardingStep !== null) {
