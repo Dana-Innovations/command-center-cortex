@@ -6,9 +6,20 @@ import { useCalendar } from "@/hooks/useCalendar";
 import { useEmails } from "@/hooks/useEmails";
 import { useTasks } from "@/hooks/useTasks";
 import { useSalesforce } from "@/hooks/useSalesforce";
+import { useTeams } from "@/hooks/useTeams";
+import { useChats } from "@/hooks/useChats";
+import { useTeamsChannelMessages } from "@/hooks/useTeamsChannelMessages";
 import { useAuth } from "@/hooks/useAuth";
 import { toPacificDate, parseCalendarDate } from "@/lib/calendar";
-import type { CalendarEvent, Email, Task, SalesforceOpportunity } from "@/lib/types";
+import type {
+  CalendarEvent,
+  Email,
+  Task,
+  SalesforceOpportunity,
+  TeamsChannel,
+  TeamsChannelMessage,
+  Chat,
+} from "@/lib/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -105,11 +116,17 @@ interface PrepBullet {
 }
 
 interface MeetingContext {
+  meetingType: MeetingType;
+  lookbackDate: Date;
   attendees: Attendee[];
   emailThreads: EmailThread[];
   relatedTasks: Task[];
+  taggedTasks: TaggedTask[];
+  taskChangeSummary: string;
   relatedOpps: SalesforceOpportunity[];
   prepBullets: PrepBullet[];
+  relevantChannels: RelevantChannel[];
+  relevantChats: RelevantChat[];
 }
 
 interface AIMeetingPrep {
@@ -128,16 +145,281 @@ interface AIMeetingPrep {
   risks: string[];
 }
 
+type MeetingType = "one-on-one" | "recurring-team" | "cross-functional";
+
+type TaskChangeType = "newly-completed" | "became-overdue" | "newly-created" | "ongoing";
+
+interface TaggedTask extends Task {
+  changeType: TaskChangeType;
+}
+
+interface RelevantChannel {
+  channel: TeamsChannel;
+  messageCount: number;
+  threadCount: number;
+  topAuthor: string;
+  score: number;
+}
+
+interface RelevantChat {
+  chat: Chat;
+  activityLevel: "Active" | "Light" | null;
+  lastPreview: string;
+  lastTimestamp: string;
+}
+
+// ─── Meeting Type & Cadence ─────────────────────────────────────────────────
+
+const STOP_WORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "into", "over", "about",
+  "meeting", "call", "sync", "chat", "discussion", "review", "update",
+]);
+
+function tokenizeSubject(subject: string): string[] {
+  return subject
+    .toLowerCase()
+    .split(/[\s\-_/]+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+}
+
+function classifyMeeting(
+  event: CalendarEvent,
+  allEvents: CalendarEvent[]
+): MeetingType {
+  const subjectLower = event.subject.toLowerCase();
+
+  // 1:1 detection
+  const attendeeCount = (event.attendees?.length ?? 0) + 1; // +1 for organizer
+  const is1on1Keywords =
+    subjectLower.includes("1:1") ||
+    subjectLower.includes("one on one") ||
+    subjectLower.includes("check-in") ||
+    subjectLower.includes("check in");
+  if (attendeeCount <= 2 || is1on1Keywords) return "one-on-one";
+
+  // Recurring detection -- look for past events with matching subject+organizer
+  const eventStart = parseCalendarDate(event.start_time);
+  if (eventStart) {
+    const sixtyDaysAgo = new Date(eventStart.getTime() - 60 * 86400000);
+    const pastMatches = allEvents.filter((ev) => {
+      if (ev.id === event.id) return false;
+      const evStart = parseCalendarDate(ev.start_time);
+      if (!evStart || evStart >= eventStart || evStart < sixtyDaysAgo) return false;
+      return (
+        ev.subject.toLowerCase() === subjectLower &&
+        normalizeName(ev.organizer || "") === normalizeName(event.organizer || "")
+      );
+    });
+    if (pastMatches.length > 0) return "recurring-team";
+  }
+
+  return "cross-functional";
+}
+
+function detectLookbackDate(
+  event: CalendarEvent,
+  allEvents: CalendarEvent[]
+): Date {
+  const eventStart = parseCalendarDate(event.start_time);
+  const fallback = new Date(Date.now() - 7 * 86400000);
+  if (!eventStart) return fallback;
+
+  const subjectLower = event.subject.toLowerCase();
+  const organizerNorm = normalizeName(event.organizer || "");
+
+  // Find past occurrences, sorted descending
+  const pastOccurrences = allEvents
+    .filter((ev) => {
+      if (ev.id === event.id) return false;
+      const evStart = parseCalendarDate(ev.start_time);
+      if (!evStart || evStart >= eventStart) return false;
+      return (
+        ev.subject.toLowerCase() === subjectLower &&
+        normalizeName(ev.organizer || "") === organizerNorm
+      );
+    })
+    .sort((a, b) => {
+      const aStart = parseCalendarDate(a.start_time)?.getTime() ?? 0;
+      const bStart = parseCalendarDate(b.start_time)?.getTime() ?? 0;
+      return bStart - aStart;
+    });
+
+  if (pastOccurrences.length === 0) return fallback;
+
+  // Use the most recent past occurrence as lookback start
+  const lastOccurrence = parseCalendarDate(pastOccurrences[0].start_time);
+  if (!lastOccurrence) return fallback;
+
+  return lastOccurrence;
+}
+
+// ─── Teams Channel Matching ─────────────────────────────────────────────────
+
+function findRelevantChannels(
+  event: CalendarEvent,
+  channels: TeamsChannel[],
+  channelMessages: TeamsChannelMessage[],
+  attendeeNames: string[],
+  lookbackDate: Date
+): RelevantChannel[] {
+  const keywords = tokenizeSubject(event.subject);
+  const scored: RelevantChannel[] = [];
+
+  for (const channel of channels) {
+    let score = 0;
+    const channelNameLower = channel.channel_name.toLowerCase();
+    const teamNameLower = channel.team_name.toLowerCase();
+
+    // Name matching
+    for (const kw of keywords) {
+      if (channelNameLower.includes(kw)) score += 3;
+      if (teamNameLower.includes(kw)) score += 1;
+    }
+
+    // Filter messages in this channel within lookback window
+    const recentMessages = channelMessages.filter(
+      (m) =>
+        m.channel_id === channel.channel_id &&
+        new Date(m.timestamp) >= lookbackDate
+    );
+
+    // Attendee overlap scoring
+    const activeAttendees = new Set<string>();
+    for (const msg of recentMessages) {
+      for (const name of attendeeNames) {
+        if (nameMatchesLoose(msg.author_name, name)) {
+          activeAttendees.add(name);
+        }
+      }
+    }
+    const overlapRatio =
+      attendeeNames.length > 0
+        ? activeAttendees.size / attendeeNames.length
+        : 0;
+    if (overlapRatio >= 0.5) score += 5;
+    else if (activeAttendees.size > 0) score += 2;
+
+    if (score === 0) continue;
+
+    // Compute stats
+    const threadCount = recentMessages.filter((m) => m.reply_count > 0).length;
+
+    // Find most active author
+    const authorCounts = new Map<string, number>();
+    for (const m of recentMessages) {
+      authorCounts.set(m.author_name, (authorCounts.get(m.author_name) || 0) + 1);
+    }
+    let topAuthor = "";
+    let topCount = 0;
+    for (const [author, count] of authorCounts) {
+      if (count > topCount) {
+        topAuthor = author;
+        topCount = count;
+      }
+    }
+
+    scored.push({
+      channel,
+      messageCount: recentMessages.length,
+      threadCount,
+      topAuthor: normalizeName(topAuthor),
+      score,
+    });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+// ─── Teams DM Matching ──────────────────────────────────────────────────────
+
+function findRelevantChats(
+  chats: Chat[],
+  attendeeNames: string[],
+  lookbackDate: Date
+): RelevantChat[] {
+  const results: RelevantChat[] = [];
+
+  for (const chat of chats) {
+    if (new Date(chat.last_activity) < lookbackDate) continue;
+
+    const membersMatch = attendeeNames.some((name) =>
+      chat.members?.some((member) => nameMatchesLoose(member, name))
+    );
+    if (!membersMatch) continue;
+
+    // Estimate activity from messages array if present
+    const msgCount = chat.messages?.filter(
+      (m) => new Date(m.timestamp) >= lookbackDate
+    ).length ?? 0;
+
+    let activityLevel: "Active" | "Light" | null = null;
+    if (msgCount >= 5) activityLevel = "Active";
+    else if (msgCount >= 1) activityLevel = "Light";
+    // If no messages array, infer from last_activity existence
+    else if (chat.last_activity && new Date(chat.last_activity) >= lookbackDate) {
+      activityLevel = "Light";
+    }
+
+    results.push({
+      chat,
+      activityLevel,
+      lastPreview: (chat.last_message_preview || "").slice(0, 80),
+      lastTimestamp: chat.last_activity,
+    });
+  }
+
+  return results;
+}
+
+// ─── Task Change Tagging ────────────────────────────────────────────────────
+
+function tagTaskChanges(tasks: Task[], lookbackDate: Date): TaggedTask[] {
+  return tasks.map((task) => {
+    let changeType: TaskChangeType = "ongoing";
+
+    if (task.completed) {
+      // Use modified_at as proxy for completion date
+      const modifiedAt = task.modified_at ? new Date(task.modified_at) : null;
+      if (modifiedAt && modifiedAt >= lookbackDate) changeType = "newly-completed";
+      else changeType = "newly-completed"; // still tag if completed and in results
+    } else if (
+      task.days_overdue > 0 &&
+      task.due_on &&
+      new Date(task.due_on) >= lookbackDate
+    ) {
+      changeType = "became-overdue";
+    } else if (
+      task.modified_at &&
+      new Date(task.modified_at) >= lookbackDate &&
+      task.synced_at &&
+      // Approximate: if first synced recently, likely newly created
+      Math.abs(new Date(task.synced_at).getTime() - new Date(task.modified_at).getTime()) < 86400000
+    ) {
+      changeType = "newly-created";
+    }
+
+    return { ...task, changeType };
+  });
+}
+
 // ─── Data Builder ────────────────────────────────────────────────────────────
 
 function buildMeetingContext(
   event: CalendarEvent,
+  allEvents: CalendarEvent[],
   allEmails: Email[],
   sentEmails: Email[],
   tasks: Task[],
   opportunities: SalesforceOpportunity[],
+  channels: TeamsChannel[],
+  channelMessages: TeamsChannelMessage[],
+  chats: Chat[],
   ownName: string
 ): MeetingContext {
+  const meetingType = classifyMeeting(event, allEvents);
+  const lookbackDate = detectLookbackDate(event, allEvents);
   // Build attendee list from organizer
   const attendees: Attendee[] = [];
   const organizerName = normalizeName(event.organizer || "");
@@ -203,9 +485,13 @@ function buildMeetingContext(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
 
-  // Find related tasks
+  // Find related tasks (include recently completed within lookback window)
   const relatedTasks = tasks.filter((task) => {
-    if (task.completed) return false;
+    if (task.completed) {
+      // Include completed tasks only if modified (completed) within lookback window
+      const modifiedAt = task.modified_at ? new Date(task.modified_at) : null;
+      if (!modifiedAt || modifiedAt < lookbackDate) return false;
+    }
     const taskPeople = [
       task.assignee_name,
       task.created_by_name,
@@ -332,12 +618,59 @@ function buildMeetingContext(
     });
   }
 
+  // Teams channel + DM matching
+  const relevantChannels = findRelevantChannels(
+    event, channels, channelMessages, attendeeNames, lookbackDate
+  );
+  const relevantChats = findRelevantChats(chats, attendeeNames, lookbackDate);
+
+  // Tag tasks with change types
+  const slicedTasks = relatedTasks.slice(0, 10);
+  const tagged = tagTaskChanges(slicedTasks, lookbackDate);
+  const completedCount = tagged.filter((t) => t.changeType === "newly-completed").length;
+  const overdueCount = tagged.filter((t) => t.changeType === "became-overdue").length;
+  const newCount = tagged.filter((t) => t.changeType === "newly-created").length;
+  const summaryParts: string[] = [];
+  if (completedCount > 0) summaryParts.push(`${completedCount} completed`);
+  if (overdueCount > 0) summaryParts.push(`${overdueCount} became overdue`);
+  if (newCount > 0) summaryParts.push(`${newCount} new`);
+  const taskChangeSummary = summaryParts.length > 0
+    ? `${summaryParts.join(", ")} since last sync`
+    : "";
+
+  // Add Teams-related prep bullets
+  if (relevantChannels.length > 0) {
+    const totalMsgs = relevantChannels.reduce((s, c) => s + c.messageCount, 0);
+    if (totalMsgs > 0) {
+      prepBullets.push({
+        text: `${totalMsgs} Teams channel message${totalMsgs > 1 ? "s" : ""} across ${relevantChannels.length} channel${relevantChannels.length > 1 ? "s" : ""} since last sync`,
+        type: "context",
+      });
+    }
+  }
+
+  if (relevantChats.length > 0) {
+    const activeCount = relevantChats.filter((c) => c.activityLevel === "Active").length;
+    if (activeCount > 0) {
+      prepBullets.push({
+        text: `${activeCount} active DM conversation${activeCount > 1 ? "s" : ""} with attendees`,
+        type: "context",
+      });
+    }
+  }
+
   return {
+    meetingType,
+    lookbackDate,
     attendees,
     emailThreads: emailThreads.slice(0, 5),
-    relatedTasks: relatedTasks.slice(0, 8),
+    relatedTasks: slicedTasks,
+    taggedTasks: tagged,
+    taskChangeSummary,
     relatedOpps: relatedOpps.slice(0, 5),
     prepBullets: prepBullets.slice(0, 8),
+    relevantChannels,
+    relevantChats,
   };
 }
 
@@ -633,6 +966,233 @@ function AIResearchSection({ aiPrep }: { aiPrep: AIMeetingPrep }) {
   );
 }
 
+// ─── Meeting Type Badge ─────────────────────────────────────────────────────
+
+const MEETING_TYPE_LABELS: Record<MeetingType, string> = {
+  "one-on-one": "1:1",
+  "recurring-team": "Team Sync",
+  "cross-functional": "Cross-functional",
+};
+
+const MEETING_TYPE_COLORS: Record<MeetingType, string> = {
+  "one-on-one": "bg-accent-teal/15 text-accent-teal",
+  "recurring-team": "bg-accent-amber/15 text-accent-amber",
+  "cross-functional": "bg-purple-500/15 text-purple-400",
+};
+
+// ─── Teams Channels Section ─────────────────────────────────────────────────
+
+function TeamsChannelsSection({ channels }: { channels: RelevantChannel[] }) {
+  if (channels.length === 0) return null;
+
+  return (
+    <CollapsibleSection
+      title="Teams Channels"
+      icon={
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      }
+      count={channels.length}
+    >
+      <div className="space-y-2 px-1">
+        {channels.map((ch) => (
+          <div
+            key={ch.channel.channel_id}
+            className="p-2.5 rounded-lg bg-[var(--bg-card-border)]/50"
+          >
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs font-medium text-text-heading">
+                #{ch.channel.channel_name}
+              </span>
+              <span className="text-[10px] text-text-muted">
+                {ch.channel.team_name}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] text-text-muted">
+              <span>{ch.messageCount} message{ch.messageCount !== 1 ? "s" : ""}</span>
+              {ch.threadCount > 0 && (
+                <>
+                  <span>·</span>
+                  <span>{ch.threadCount} active thread{ch.threadCount !== 1 ? "s" : ""}</span>
+                </>
+              )}
+              {ch.topAuthor && (
+                <>
+                  <span>·</span>
+                  <span>Most active: {ch.topAuthor}</span>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+// ─── Teams DMs Section ──────────────────────────────────────────────────────
+
+function TeamsDMsSection({ chats }: { chats: RelevantChat[] }) {
+  if (chats.length === 0) return null;
+
+  return (
+    <CollapsibleSection
+      title="Teams DMs"
+      icon={
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      }
+      count={chats.length}
+    >
+      <div className="space-y-1.5 px-1">
+        {chats.map((rc) => (
+          <a
+            key={rc.chat.id}
+            href={rc.chat.web_url || "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-card-border)]/50 hover:bg-[var(--bg-card-border)] transition-colors group"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-text-heading truncate group-hover:text-accent-amber transition-colors">
+                  {rc.chat.topic || rc.chat.members?.join(", ") || "Chat"}
+                </span>
+                {rc.activityLevel && (
+                  <span
+                    className={cn(
+                      "text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded",
+                      rc.activityLevel === "Active"
+                        ? "bg-accent-teal/15 text-accent-teal"
+                        : "bg-[var(--bg-card-border)] text-text-muted"
+                    )}
+                  >
+                    {rc.activityLevel}
+                  </span>
+                )}
+              </div>
+              {rc.lastPreview && (
+                <p className="text-[11px] text-text-muted mt-0.5 truncate opacity-70">
+                  {rc.lastPreview}
+                </p>
+              )}
+            </div>
+            <span className="text-[10px] text-text-muted shrink-0">
+              {timeAgo(rc.lastTimestamp)}
+            </span>
+          </a>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+// ─── Enhanced Tasks Section ─────────────────────────────────────────────────
+
+const CHANGE_TYPE_STYLES: Record<TaskChangeType, { label: string; className: string }> = {
+  "newly-completed": { label: "Completed", className: "bg-accent-teal/15 text-accent-teal" },
+  "became-overdue": { label: "Overdue", className: "bg-accent-red/15 text-accent-red" },
+  "newly-created": { label: "New", className: "bg-blue-500/15 text-blue-400" },
+  "ongoing": { label: "", className: "" },
+};
+
+function EnhancedTasksSection({
+  taggedTasks,
+  changeSummary,
+}: {
+  taggedTasks: TaggedTask[];
+  changeSummary: string;
+}) {
+  return (
+    <CollapsibleSection
+      title="Tasks"
+      icon={
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+      }
+      count={taggedTasks.length}
+      defaultOpen={taggedTasks.length > 0}
+    >
+      {taggedTasks.length === 0 ? (
+        <p className="text-xs text-text-muted px-1">
+          No tasks involving attendees
+        </p>
+      ) : (
+        <div className="space-y-1.5 px-1">
+          {changeSummary && (
+            <p className="text-[10px] text-text-muted mb-2 italic">
+              {changeSummary}
+            </p>
+          )}
+          {taggedTasks.map((task) => {
+            const style = CHANGE_TYPE_STYLES[task.changeType];
+            return (
+              <a
+                key={task.id}
+                href={task.permalink_url || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-card-border)]/50 hover:bg-[var(--bg-card-border)] transition-colors group"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "text-xs font-medium truncate group-hover:text-accent-amber transition-colors",
+                      task.completed ? "text-text-muted line-through" : "text-text-heading"
+                    )}>
+                      {task.name}
+                    </span>
+                    {style.label && (
+                      <span className={cn("text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0", style.className)}>
+                        {style.label}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                    {task.assignee_name && <span>{task.assignee_name}</span>}
+                    {task.project_name && (
+                      <>
+                        <span>·</span>
+                        <span>{task.project_name}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  {task.due_on && !task.completed && (
+                    <span
+                      className={cn(
+                        "text-[10px] font-medium",
+                        task.days_overdue > 0 ? "text-accent-red" : "text-text-muted"
+                      )}
+                    >
+                      {task.days_overdue > 0
+                        ? `${task.days_overdue}d overdue`
+                        : new Date(task.due_on).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                    </span>
+                  )}
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+// ─── Prep Panel ─────────────────────────────────────────────────────────────
+
 function PrepPanel({
   event,
   context,
@@ -648,19 +1208,171 @@ function PrepPanel({
   aiError?: string | null;
   onResearch: () => void;
 }) {
-  const { attendees, emailThreads, relatedTasks, relatedOpps, prepBullets } =
-    context;
+  const {
+    meetingType,
+    attendees,
+    emailThreads,
+    taggedTasks,
+    taskChangeSummary,
+    relatedOpps,
+    prepBullets,
+    relevantChannels,
+    relevantChats,
+  } = context;
 
   const risks = prepBullets.filter((b) => b.type === "risk");
   const contextBullets = prepBullets.filter((b) => b.type === "context");
+
+  // Build section order based on meeting type
+  const teamsChannelsSection = <TeamsChannelsSection key="channels" channels={relevantChannels} />;
+  const teamsDMsSection = <TeamsDMsSection key="dms" chats={relevantChats} />;
+  const tasksSection = (
+    <EnhancedTasksSection
+      key="tasks"
+      taggedTasks={taggedTasks}
+      changeSummary={taskChangeSummary}
+    />
+  );
+
+  const emailSection = (
+    <CollapsibleSection
+      key="emails"
+      title="Recent Emails"
+      icon={
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="M22 7l-10 7L2 7" />
+        </svg>
+      }
+      count={emailThreads.length}
+      defaultOpen={emailThreads.length > 0}
+    >
+      {emailThreads.length === 0 ? (
+        <p className="text-xs text-text-muted px-1">
+          No recent email threads with attendees
+        </p>
+      ) : (
+        <div className="space-y-2 px-1">
+          {emailThreads.map((thread, i) => (
+            <div
+              key={i}
+              className="p-2.5 rounded-lg bg-[var(--bg-card-border)]/50"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-medium text-text-heading truncate flex-1">
+                  {thread.subject}
+                </span>
+                {thread.emails.length > 1 && (
+                  <span className="text-[10px] text-text-muted shrink-0">
+                    {thread.emails.length} msgs
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                <span>{thread.lastSender}</span>
+                <span>·</span>
+                <span>{timeAgo(thread.date)}</span>
+              </div>
+              {thread.snippet && (
+                <p className="text-[11px] text-text-muted mt-1 line-clamp-2 opacity-70">
+                  {thread.snippet}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+
+  const oppsSection = (
+    <CollapsibleSection
+      key="opps"
+      title="Salesforce Opportunities"
+      icon={
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M23 6l-9.5 9.5-5-5L1 18" />
+          <path d="M17 6h6v6" />
+        </svg>
+      }
+      count={relatedOpps.length}
+      defaultOpen={relatedOpps.length > 0}
+    >
+      {relatedOpps.length === 0 ? (
+        <p className="text-xs text-text-muted px-1">
+          No matching opportunities
+        </p>
+      ) : (
+        <div className="space-y-1.5 px-1">
+          {relatedOpps.map((opp) => (
+            <a
+              key={opp.id}
+              href={opp.sf_url || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-2.5 rounded-lg bg-[var(--bg-card-border)]/50 hover:bg-[var(--bg-card-border)] transition-colors group"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium text-text-heading truncate group-hover:text-accent-amber transition-colors">
+                  {opp.name}
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                  <span>{opp.account_name}</span>
+                  <span>·</span>
+                  <span>{opp.stage}</span>
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-xs font-semibold text-accent-teal">
+                  ${opp.amount?.toLocaleString() || "—"}
+                </div>
+                {opp.close_date && (
+                  <div className="text-[10px] text-text-muted">
+                    Close{" "}
+                    {new Date(opp.close_date).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </div>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+
+  // Section ordering by meeting type
+  let orderedSections: React.ReactNode[];
+  switch (meetingType) {
+    case "one-on-one":
+      orderedSections = [teamsDMsSection, emailSection, tasksSection, teamsChannelsSection, oppsSection];
+      break;
+    case "recurring-team":
+      orderedSections = [teamsChannelsSection, tasksSection, emailSection, teamsDMsSection, oppsSection];
+      break;
+    case "cross-functional":
+    default:
+      orderedSections = [teamsChannelsSection, emailSection, tasksSection, teamsDMsSection, oppsSection];
+      break;
+  }
 
   return (
     <div className="space-y-0">
       {/* Meeting header */}
       <div className="pb-4 mb-1 border-b border-[var(--bg-card-border)]">
-        <h2 className="text-lg font-semibold text-text-heading mb-1">
-          {event.subject}
-        </h2>
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-semibold text-text-heading">
+            {event.subject}
+          </h2>
+          <span className={cn(
+            "text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
+            MEETING_TYPE_COLORS[meetingType]
+          )}>
+            {MEETING_TYPE_LABELS[meetingType]}
+          </span>
+        </div>
         <div className="flex items-center gap-3 text-xs text-text-muted">
           <span>{formatRelativeDate(event.start_time)}</span>
           <span>·</span>
@@ -847,175 +1559,8 @@ function PrepPanel({
         )}
       </CollapsibleSection>
 
-      {/* Email Threads */}
-      <CollapsibleSection
-        title="Recent Emails"
-        icon={
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path d="M22 7l-10 7L2 7" />
-          </svg>
-        }
-        count={emailThreads.length}
-        defaultOpen={emailThreads.length > 0}
-      >
-        {emailThreads.length === 0 ? (
-          <p className="text-xs text-text-muted px-1">
-            No recent email threads with attendees
-          </p>
-        ) : (
-          <div className="space-y-2 px-1">
-            {emailThreads.map((thread, i) => (
-              <div
-                key={i}
-                className="p-2.5 rounded-lg bg-[var(--bg-card-border)]/50"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium text-text-heading truncate flex-1">
-                    {thread.subject}
-                  </span>
-                  {thread.emails.length > 1 && (
-                    <span className="text-[10px] text-text-muted shrink-0">
-                      {thread.emails.length} msgs
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-[10px] text-text-muted">
-                  <span>{thread.lastSender}</span>
-                  <span>·</span>
-                  <span>{timeAgo(thread.date)}</span>
-                </div>
-                {thread.snippet && (
-                  <p className="text-[11px] text-text-muted mt-1 line-clamp-2 opacity-70">
-                    {thread.snippet}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* Open Tasks */}
-      <CollapsibleSection
-        title="Open Tasks"
-        icon={
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-        }
-        count={relatedTasks.length}
-        defaultOpen={relatedTasks.length > 0}
-      >
-        {relatedTasks.length === 0 ? (
-          <p className="text-xs text-text-muted px-1">
-            No open tasks involving attendees
-          </p>
-        ) : (
-          <div className="space-y-1.5 px-1">
-            {relatedTasks.map((task) => (
-              <a
-                key={task.id}
-                href={task.permalink_url || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-card-border)]/50 hover:bg-[var(--bg-card-border)] transition-colors group"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-text-heading truncate group-hover:text-accent-amber transition-colors">
-                    {task.name}
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
-                    {task.assignee_name && <span>{task.assignee_name}</span>}
-                    {task.project_name && (
-                      <>
-                        <span>·</span>
-                        <span>{task.project_name}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  {task.due_on && (
-                    <span
-                      className={cn(
-                        "text-[10px] font-medium",
-                        task.days_overdue > 0
-                          ? "text-accent-red"
-                          : "text-text-muted"
-                      )}
-                    >
-                      {task.days_overdue > 0
-                        ? `${task.days_overdue}d overdue`
-                        : new Date(task.due_on).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                    </span>
-                  )}
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* Salesforce Opportunities */}
-      <CollapsibleSection
-        title="Salesforce Opportunities"
-        icon={
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M23 6l-9.5 9.5-5-5L1 18" />
-            <path d="M17 6h6v6" />
-          </svg>
-        }
-        count={relatedOpps.length}
-        defaultOpen={relatedOpps.length > 0}
-      >
-        {relatedOpps.length === 0 ? (
-          <p className="text-xs text-text-muted px-1">
-            No matching opportunities
-          </p>
-        ) : (
-          <div className="space-y-1.5 px-1">
-            {relatedOpps.map((opp) => (
-              <a
-                key={opp.id}
-                href={opp.sf_url || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 p-2.5 rounded-lg bg-[var(--bg-card-border)]/50 hover:bg-[var(--bg-card-border)] transition-colors group"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-text-heading truncate group-hover:text-accent-amber transition-colors">
-                    {opp.name}
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
-                    <span>{opp.account_name}</span>
-                    <span>·</span>
-                    <span>{opp.stage}</span>
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-xs font-semibold text-accent-teal">
-                    ${opp.amount?.toLocaleString() || "—"}
-                  </div>
-                  {opp.close_date && (
-                    <div className="text-[10px] text-text-muted">
-                      Close{" "}
-                      {new Date(opp.close_date).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </div>
-                  )}
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
+      {/* Dynamic sections ordered by meeting type */}
+      {orderedSections}
     </div>
   );
 }
@@ -1027,6 +1572,9 @@ export function MeetingPrepView({ initialEventId }: { initialEventId?: string })
   const { emails, sentEmails, loading: emailsLoading } = useEmails();
   const { tasks, loading: tasksLoading } = useTasks();
   const { opportunities, loading: sfLoading } = useSalesforce();
+  const { channels, loading: teamsLoading } = useTeams();
+  const { chats, loading: chatsLoading } = useChats();
+  const { messages: channelMessages, loading: channelMsgsLoading } = useTeamsChannelMessages();
   const { user } = useAuth();
   const fullName = user?.user_metadata?.full_name ?? "";
 
@@ -1035,7 +1583,7 @@ export function MeetingPrepView({ initialEventId }: { initialEventId?: string })
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  const loading = calLoading || emailsLoading || tasksLoading || sfLoading;
+  const loading = calLoading || emailsLoading || tasksLoading || sfLoading || teamsLoading || chatsLoading || channelMsgsLoading;
 
   // Auto-select meeting from initialEventId prop
   useEffect(() => {
@@ -1068,13 +1616,17 @@ export function MeetingPrepView({ initialEventId }: { initialEventId?: string })
     if (!selectedEvent) return null;
     return buildMeetingContext(
       selectedEvent,
+      events,
       emails,
       sentEmails,
       tasks,
       opportunities,
+      channels,
+      channelMessages,
+      chats,
       fullName
     );
-  }, [selectedEvent, emails, sentEmails, tasks, opportunities, fullName]);
+  }, [selectedEvent, events, emails, sentEmails, tasks, opportunities, channels, channelMessages, chats, fullName]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
