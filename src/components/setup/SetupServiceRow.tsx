@@ -200,7 +200,7 @@ export function SetupServiceRow({
       </div>
 
       {/* Expanded config panel */}
-      {expanded && state === "connected-configuring" && (
+      {expanded && isConnected && (
         <div className="border-t border-white/5">
           {children ?? (
             <div className="p-4 text-text-muted text-sm">
