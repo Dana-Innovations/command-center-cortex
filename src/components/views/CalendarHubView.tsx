@@ -2,11 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { useConnections } from "@/hooks/useConnections";
-import { useAttention } from "@/lib/attention/client";
 import type { CalendarSubView } from "@/lib/tab-config";
 import { CalendarView } from "@/components/views/CalendarView";
 import { MeetingPrepView } from "@/components/views/MeetingPrepView";
-import { SurfaceConnectState } from "@/components/views/SurfaceConnectState";
+import { InlineConnectBanner } from "@/components/ui/InlineConnectBanner";
 import { SurfaceIntro, SurfaceSubnav } from "@/components/views/SurfaceChrome";
 
 interface CalendarHubViewProps {
@@ -21,13 +20,12 @@ interface CalendarHubViewProps {
 export function CalendarHubView({
   activeSubView,
   initialEventId,
-  onConnectService,
+  onConnectService: _onConnectService,
   onOpenCalendarPrep,
   onOpenSetup,
   onSubViewChange,
 }: CalendarHubViewProps) {
   const connections = useConnections();
-  const { connectingService } = useAttention();
 
   return (
     <div className="space-y-5">
@@ -53,27 +51,11 @@ export function CalendarHubView({
         ]}
       />
 
-      {!connections.m365 ? (
-        <SurfaceConnectState
-          title="Connect Microsoft 365 for calendar context"
-          description="Calendar and meeting prep depend on your live Microsoft 365 calendar. This is also the fastest way to make Home feel like a command center."
-          services={["Microsoft 365"]}
-          outcomes={[
-            "Your real schedule for today and this week",
-            "Meeting prep tied to upcoming calendar events",
-            "Live calendar signals feeding the morning brief",
-          ]}
-          primaryActionLabel={
-            connectingService === "microsoft"
-              ? "Connecting Microsoft 365..."
-              : "Connect Microsoft 365"
-          }
-          primaryActionDisabled={connectingService === "microsoft"}
-          onPrimaryAction={() => void onConnectService("microsoft")}
-          secondaryActionLabel={onOpenSetup ? "Personalize" : undefined}
-          onSecondaryAction={onOpenSetup}
-        />
-      ) : activeSubView === "prep" ? (
+      {!connections.m365 && (
+        <InlineConnectBanner service="Microsoft 365" onConnect={onOpenSetup} />
+      )}
+
+      {activeSubView === "prep" ? (
         <MeetingPrepView initialEventId={initialEventId} />
       ) : (
         <CalendarView onPrepMeeting={onOpenCalendarPrep ? (id: string) => onOpenCalendarPrep(id) : undefined} />

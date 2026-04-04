@@ -2,11 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { useConnections } from "@/hooks/useConnections";
-import { useAttention } from "@/lib/attention/client";
 import type { PerformanceSubView } from "@/lib/tab-config";
 import { MetricsView } from "@/components/views/MetricsView";
 import { SalesTabView } from "@/components/views/SalesTabView";
-import { SurfaceConnectState } from "@/components/views/SurfaceConnectState";
+import { InlineConnectBanner } from "@/components/ui/InlineConnectBanner";
 import { SurfaceIntro, SurfaceSubnav } from "@/components/views/SurfaceChrome";
 
 interface PerformanceViewProps {
@@ -18,13 +17,11 @@ interface PerformanceViewProps {
 
 export function PerformanceView({
   activeSubView,
-  onConnectService,
+  onConnectService: _onConnectService,
   onOpenSetup,
   onSubViewChange,
 }: PerformanceViewProps) {
   const connections = useConnections();
-  const { connectingService } = useAttention();
-  const hasAnyData = connections.salesforce || connections.powerbi;
 
   return (
     <div className="space-y-5">
@@ -50,70 +47,17 @@ export function PerformanceView({
         ]}
       />
 
-      {!hasAnyData ? (
-        <SurfaceConnectState
-          title="Connect business performance data"
-          description="Start with Salesforce to unlock the fastest real performance win here, then add Power BI for supporting dashboards."
-          services={["Salesforce", "Power BI"]}
-          outcomes={[
-            "Live pipeline risk and opportunity movement",
-            "Open deals that need attention soon",
-            "Metrics and dashboards once Power BI is added",
-          ]}
-          primaryActionLabel={
-            connectingService === "salesforce"
-              ? "Connecting Salesforce..."
-              : "Connect Salesforce"
-          }
-          primaryActionDisabled={connectingService === "salesforce"}
-          onPrimaryAction={() => void onConnectService("salesforce")}
-          secondaryActionLabel={onOpenSetup ? "Personalize" : undefined}
-          onSecondaryAction={onOpenSetup}
-        />
-      ) : activeSubView === "metrics" ? (
-        connections.powerbi ? (
-          <MetricsView />
-        ) : (
-          <SurfaceConnectState
-            title="Connect Power BI to view metrics"
-            description="This subview is reserved for KPI cards and reports from Power BI."
-            services={["Power BI"]}
-            outcomes={[
-              "Executive KPI cards from live BI data",
-              "Supporting reports behind pipeline movement",
-            ]}
-            primaryActionLabel={
-              connectingService === "powerbi"
-                ? "Connecting Power BI..."
-                : "Connect Power BI"
-            }
-            primaryActionDisabled={connectingService === "powerbi"}
-            onPrimaryAction={() => void onConnectService("powerbi")}
-            secondaryActionLabel={onOpenSetup ? "Personalize" : undefined}
-            onSecondaryAction={onOpenSetup}
-          />
-        )
-      ) : connections.salesforce ? (
-        <SalesTabView />
+      {!connections.salesforce && (
+        <InlineConnectBanner service="Salesforce" onConnect={onOpenSetup} />
+      )}
+      {!connections.powerbi && (
+        <InlineConnectBanner service="Power BI" onConnect={onOpenSetup} />
+      )}
+
+      {activeSubView === "metrics" ? (
+        connections.powerbi ? <MetricsView /> : null
       ) : (
-        <SurfaceConnectState
-          title="Connect Salesforce to view sales performance"
-          description="This subview is reserved for pipeline, trends, and open opportunity detail from Salesforce."
-          services={["Salesforce"]}
-          outcomes={[
-            "Pipeline trend lines from live opportunity data",
-            "Open deals and follow-up risk in one place",
-          ]}
-          primaryActionLabel={
-            connectingService === "salesforce"
-              ? "Connecting Salesforce..."
-              : "Connect Salesforce"
-          }
-          primaryActionDisabled={connectingService === "salesforce"}
-          onPrimaryAction={() => void onConnectService("salesforce")}
-          secondaryActionLabel={onOpenSetup ? "Personalize" : undefined}
-          onSecondaryAction={onOpenSetup}
-        />
+        connections.salesforce ? <SalesTabView /> : null
       )}
     </div>
   );
