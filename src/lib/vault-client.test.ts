@@ -114,8 +114,7 @@ describe("getVaultPerson", () => {
 
     const mockSingle = vi.fn().mockResolvedValue({ data: mockRow, error: null });
     const mockIlike = vi.fn(() => ({ single: mockSingle }));
-    const mockEqFolder = vi.fn(() => ({ ilike: mockIlike }));
-    const mockEq = vi.fn(() => ({ eq: mockEqFolder }));
+    const mockEq = vi.fn(() => ({ ilike: mockIlike }));
     const mockSelect = vi.fn(() => ({ eq: mockEq }));
     const mockFrom = vi.fn(() => ({ select: mockSelect }));
     (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: mockFrom, rpc: vi.fn() });

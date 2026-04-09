@@ -106,7 +106,6 @@ export async function getVaultPerson(
     const { data, error } = await client
       .from("vault_pages")
       .select("file_path, title, content, frontmatter, tags, wikilinks, backlinks")
-      .eq("type", "person")
       .eq("folder", "company/people")
       .ilike("title", name.trim())
       .single();
