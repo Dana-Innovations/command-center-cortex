@@ -146,6 +146,37 @@ function formatVaultPerson(row: Record<string, unknown>): VaultPerson {
 }
 
 /**
+ * Traverse the vault graph to find all connections for a given page.
+ * Uses the get_connections() Postgres function which returns both
+ * outgoing (wikilinks) and incoming (backlinks) connections.
+ */
+export async function getVaultConnections(
+  filePath: string
+): Promise<VaultConnection[]> {
+  const client = getVaultClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client.rpc("get_connections", {
+      page_path: filePath,
+    });
+
+    if (error || !data) return [];
+
+    return (data as Array<Record<string, unknown>>).map((row) => ({
+      direction: row.direction as "outgoing" | "incoming",
+      connected_path: row.connected_path as string,
+      connected_title: row.connected_title as string,
+      connected_folder: row.connected_folder as string,
+      connected_tags: (row.connected_tags as string[] | null) ?? null,
+    }));
+  } catch (e) {
+    console.warn("[vault-client] getVaultConnections failed:", e);
+    return [];
+  }
+}
+
+/**
  * Fetch a vault page by title and folder.
  * Returns the page content string, or null if not found or vault not configured.
  */

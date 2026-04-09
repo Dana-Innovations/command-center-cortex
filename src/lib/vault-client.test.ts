@@ -140,6 +140,60 @@ describe("getVaultPerson", () => {
   });
 });
 
+describe("getVaultConnections", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("VAULT_SUPABASE_URL", "https://test.supabase.co");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "test-key");
+    vi.resetModules();
+  });
+
+  it("returns connections from get_connections RPC", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+
+    const mockRpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          direction: "outgoing",
+          connected_path: "company/people/derick-dahl.md",
+          connected_title: "Derick Dahl",
+          connected_folder: "company/people",
+          connected_tags: ["person", "executive"],
+        },
+        {
+          direction: "incoming",
+          connected_path: "company/intelligence/slt-monthly-2026-03/marketing.md",
+          connected_title: "SLT Monthly — Marketing",
+          connected_folder: "company/intelligence/slt-monthly-2026-03",
+          connected_tags: ["intelligence", "marketing"],
+        },
+      ],
+      error: null,
+    });
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc: mockRpc, from: vi.fn() });
+
+    const { getVaultConnections } = await import("@/lib/vault-client");
+    const connections = await getVaultConnections("company/people/debbie-michelle.md");
+
+    expect(mockRpc).toHaveBeenCalledWith("get_connections", {
+      page_path: "company/people/debbie-michelle.md",
+    });
+    expect(connections).toHaveLength(2);
+    expect(connections[0].direction).toBe("outgoing");
+    expect(connections[1].connected_folder).toBe("company/intelligence/slt-monthly-2026-03");
+  });
+
+  it("returns empty array when vault is not configured", async () => {
+    vi.stubEnv("VAULT_SUPABASE_URL", "");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "");
+    vi.resetModules();
+
+    const { getVaultConnections } = await import("@/lib/vault-client");
+    const connections = await getVaultConnections("company/people/anyone.md");
+    expect(connections).toEqual([]);
+  });
+});
+
 describe("hasVaultAccess", () => {
   it("returns true for ari@sonance.com", async () => {
     const { hasVaultAccess } = await import("@/lib/vault-client");
