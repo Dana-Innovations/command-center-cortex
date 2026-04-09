@@ -1495,6 +1495,7 @@ function serializePromptSnapshot(snapshot: BriefApiSnapshot) {
 export interface BriefPromptEnrichment {
   peopleContext?: string[];
   yesterdayHeadline?: string | null;
+  vaultContext?: string | null;
 }
 
 export function buildBriefPrompt(
@@ -1536,6 +1537,13 @@ export function buildBriefPrompt(
     promptPayload.yesterdayContext = {
       headline: enrichment.yesterdayHeadline,
       note: "Reference this for thread continuity when today has follow-up items",
+    };
+  }
+  if (enrichment?.vaultContext) {
+    promptPayload.organizationalKnowledge = {
+      source: "Vault Graph",
+      note: "Use this to understand who people are, their departments, related initiatives, and organizational context. Reference when generating talking points or explaining why items are important.",
+      context: enrichment.vaultContext,
     };
   }
 

@@ -17,6 +17,7 @@ import {
   buildBatchDossiers,
   serializeDossierForPrompt,
 } from "@/lib/relationship-dossier";
+import { hasVaultAccess, getVaultContext } from "@/lib/vault-client";
 
 const BRIEF_SYSTEM_PROMPT = `You are an executive briefing assistant. Synthesize data from multiple business systems (email, calendar, tasks, Slack, Teams, Salesforce, Monday.com) into a concise, actionable morning brief.
 
@@ -174,9 +175,27 @@ export async function POST(request: NextRequest) {
 
 // ── Enrichment builder ────────────────────────────────────────────────────
 
+async function getUserEmail(
+  supabase: ReturnType<typeof createServiceClient>,
+  cortexUserId: string
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from("user_settings")
+      .select("settings")
+      .eq("cortex_user_id", cortexUserId)
+      .maybeSingle();
+    const email = (data?.settings as Record<string, unknown>)?.email;
+    return typeof email === "string" ? email : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface BriefEnrichment {
   peopleContext: string[];
   yesterdayHeadline: string | null;
+  vaultContext: string | null;
 }
 
 async function buildBriefEnrichment(
@@ -197,15 +216,26 @@ async function buildBriefEnrichment(
     if (item.sender) nameSet.add(item.sender);
   }
 
-  // Parallel: fetch dossiers + yesterday's brief
-  const [dossiers, yesterdayBrief] = await Promise.all([
+  // Check vault access
+  const userEmail = await getUserEmail(supabase, cortexUserId);
+  const shouldFetchVault = userEmail !== null && hasVaultAccess(userEmail);
+
+  // Parallel: fetch dossiers + yesterday's brief + vault context
+  const [dossiers, yesterdayBrief, vaultContext] = await Promise.all([
     buildBatchDossiers(supabase, cortexUserId, [...nameSet]),
     fetchYesterdayHeadline(supabase, cortexUserId, todayDate),
+    shouldFetchVault
+      ? getVaultContext([...nameSet]).catch((e) => {
+          console.warn("[morning-brief] vault context failed:", e);
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
 
   return {
     peopleContext: dossiers.map(serializeDossierForPrompt),
     yesterdayHeadline: yesterdayBrief,
+    vaultContext,
   };
 }
 
