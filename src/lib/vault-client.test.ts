@@ -27,6 +27,70 @@ vi.mock("@supabase/supabase-js", () => ({
   })),
 }));
 
+describe("searchVaultText", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("VAULT_SUPABASE_URL", "https://test.supabase.co");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "test-key");
+    vi.resetModules();
+  });
+
+  it("returns formatted search results", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+    const mockRpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "uuid-1",
+          file_path: "company/initiatives/studio-visit.md",
+          title: "Studio Visit Capture",
+          content: "Initiative about capturing studio visits...",
+          folder: "company/initiatives",
+          tags: ["sonance", "crm", "sales"],
+          rank: 0.85,
+        },
+      ],
+      error: null,
+    });
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc: mockRpc, from: vi.fn() });
+
+    const { searchVaultText } = await import("@/lib/vault-client");
+    const results = await searchVaultText("studio visit");
+
+    expect(mockRpc).toHaveBeenCalledWith("search_vault_text", {
+      search_query: "studio visit",
+      match_count: 10,
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      file_path: "company/initiatives/studio-visit.md",
+      title: "Studio Visit Capture",
+      folder: "company/initiatives",
+      tags: ["sonance", "crm", "sales"],
+      rank: 0.85,
+    });
+  });
+
+  it("returns empty array when vault is not configured", async () => {
+    vi.stubEnv("VAULT_SUPABASE_URL", "");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "");
+    vi.resetModules();
+
+    const { searchVaultText } = await import("@/lib/vault-client");
+    const results = await searchVaultText("anything");
+    expect(results).toEqual([]);
+  });
+
+  it("returns empty array on error", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+    const mockRpc = vi.fn().mockResolvedValue({ data: null, error: { message: "timeout" } });
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc: mockRpc, from: vi.fn() });
+
+    const { searchVaultText } = await import("@/lib/vault-client");
+    const results = await searchVaultText("test");
+    expect(results).toEqual([]);
+  });
+});
+
 describe("hasVaultAccess", () => {
   it("returns true for ari@sonance.com", async () => {
     const { hasVaultAccess } = await import("@/lib/vault-client");

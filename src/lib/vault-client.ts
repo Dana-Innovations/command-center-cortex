@@ -59,6 +59,38 @@ export function getVaultClient() {
 }
 
 /**
+ * Full-text search across vault pages via the search_vault_text() Postgres function.
+ * Returns empty array if vault is not configured or query fails.
+ */
+export async function searchVaultText(
+  query: string,
+  limit = 10
+): Promise<VaultSearchResult[]> {
+  const client = getVaultClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client.rpc("search_vault_text", {
+      search_query: query,
+      match_count: limit,
+    });
+
+    if (error || !data) return [];
+
+    return (data as Array<Record<string, unknown>>).map((row) => ({
+      file_path: row.file_path as string,
+      title: row.title as string,
+      folder: row.folder as string,
+      tags: (row.tags as string[] | null) ?? null,
+      rank: row.rank as number,
+    }));
+  } catch (e) {
+    console.warn("[vault-client] searchVaultText failed:", e);
+    return [];
+  }
+}
+
+/**
  * Fetch a vault page by title and folder.
  * Returns the page content string, or null if not found or vault not configured.
  */
