@@ -10,7 +10,7 @@ import {
   buildRelationshipDossier,
   serializeDossierForPrompt,
 } from "@/lib/relationship-dossier";
-import { fetchVaultPage } from "@/lib/vault-client";
+import { fetchVaultPage, getVaultPerson } from "@/lib/vault-client";
 
 function trimForModel(value: string, max = 6000): string {
   const trimmed = value.trim();
@@ -156,6 +156,22 @@ export async function POST(request: NextRequest) {
 
   const formalityGuidance = pickFormalityGuidance(channel, relevanceTier);
 
+  // Enrich with vault person context (Ari only)
+  let vaultPersonContext = "";
+  if (isAri && resolvedSender) {
+    try {
+      const vaultPerson = await getVaultPerson(resolvedSender);
+      if (vaultPerson) {
+        const parts = [`Vault context for ${vaultPerson.title}:`];
+        if (vaultPerson.department) parts.push(`Department: ${vaultPerson.department}`);
+        if (vaultPerson.contentSummary) parts.push(`Background: ${vaultPerson.contentSummary}`);
+        vaultPersonContext = parts.join(" ");
+      }
+    } catch (e) {
+      console.warn("[draft-reply] vault person lookup failed:", e);
+    }
+  }
+
   const systemPrompt = `${writingStyle}
 
 ${formalityGuidance}
@@ -167,6 +183,7 @@ Do not address copied recipients unless the reply truly needs them.
 For appreciation or thank-you notes, keep the reply to 1-3 sentences.
 Do not invent meetings, next steps, owners, or commitments unless the message or user guidance explicitly supports them.
 ${relationshipContext ? "Use the relationship context to inform tone and content — reference pending items or upcoming meetings when relevant to the reply. Never fabricate context." : ""}
+${vaultPersonContext ? `\n${vaultPersonContext}\nUse the vault context to understand the recipient's role and department. Adapt formality and content accordingly.` : ""}
 Output only the reply body. No subject line. No explanation.`;
 
   try {
