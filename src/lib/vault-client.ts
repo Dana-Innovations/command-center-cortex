@@ -1,5 +1,39 @@
 import { createClient } from "@supabase/supabase-js";
 
+// ── Vault Types ───────────────────────────────────────────────────────────
+
+export interface VaultSearchResult {
+  file_path: string;
+  title: string;
+  folder: string;
+  tags: string[] | null;
+  rank: number;
+}
+
+export interface VaultPerson {
+  file_path: string;
+  title: string;
+  department: string | null;
+  frontmatter: Record<string, unknown>;
+  wikilinks: string[];
+  backlinks: string[];
+  contentSummary: string;
+}
+
+export interface VaultConnection {
+  direction: "outgoing" | "incoming";
+  connected_path: string;
+  connected_title: string;
+  connected_folder: string;
+  connected_tags: string[] | null;
+}
+
+// ── Access Gating ─────────────────────────────────────────────────────────
+
+export function hasVaultAccess(userEmail: string): boolean {
+  return userEmail.toLowerCase() === "ari@sonance.com";
+}
+
 let _client: ReturnType<typeof createClient> | null = null;
 
 /**
