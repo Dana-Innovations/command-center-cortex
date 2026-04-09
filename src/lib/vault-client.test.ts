@@ -210,3 +210,114 @@ describe("hasVaultAccess", () => {
     expect(hasVaultAccess("")).toBe(false);
   });
 });
+
+describe("getVaultContext", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("VAULT_SUPABASE_URL", "https://test.supabase.co");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "test-key");
+    vi.resetModules();
+  });
+
+  it("builds formatted context string from people and connections", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+
+    const personRow = {
+      file_path: "company/people/debbie-michelle.md",
+      title: "Debbie Michelle",
+      content: "Debbie leads marketing.",
+      frontmatter: { type: "person", department: "Marketing" },
+      tags: ["person", "marketing"],
+      wikilinks: ["derick-dahl"],
+      backlinks: [],
+    };
+
+    const connections = [
+      {
+        direction: "incoming",
+        connected_path: "company/initiatives/marketing-summit.md",
+        connected_title: "Marketing Summit",
+        connected_folder: "company/initiatives",
+        connected_tags: ["initiative", "marketing"],
+      },
+    ];
+
+    // Mock both .from() chain (for getVaultPerson) and .rpc() (for getVaultConnections)
+    const mockSingle = vi.fn().mockResolvedValue({ data: personRow, error: null });
+    const mockIlike = vi.fn(() => ({ single: mockSingle }));
+    const mockEq = vi.fn(() => ({ ilike: mockIlike }));
+    const mockSelect = vi.fn(() => ({ eq: mockEq }));
+    const mockFrom = vi.fn(() => ({ select: mockSelect }));
+    const mockRpc = vi.fn().mockResolvedValue({ data: connections, error: null });
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: mockFrom, rpc: mockRpc });
+
+    const { getVaultContext } = await import("@/lib/vault-client");
+    const context = await getVaultContext(["Debbie Michelle"]);
+
+    expect(context).not.toBeNull();
+    expect(context).toContain("Debbie Michelle");
+    expect(context).toContain("Marketing");
+    expect(context).toContain("Marketing Summit");
+    expect(context).toContain("Organizational Knowledge");
+  });
+
+  it("returns null when no people are found", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+
+    // getVaultPerson: primary lookup fails, alias fallback also fails
+    const mockPrimarySingle = vi.fn().mockResolvedValue({ data: null, error: { message: "not found" } });
+    const mockAliasSingle = vi.fn().mockResolvedValue({ data: null, error: { message: "not found" } });
+    const mockLimit = vi.fn(() => ({ single: mockAliasSingle }));
+    const mockContains = vi.fn(() => ({ limit: mockLimit }));
+    const mockIlike = vi.fn(() => ({ single: mockPrimarySingle }));
+    // The eq call needs to return an object with BOTH ilike (primary path) and contains (fallback path)
+    const mockEq = vi.fn(() => ({ ilike: mockIlike, contains: mockContains }));
+    const mockSelect = vi.fn(() => ({ eq: mockEq }));
+    const mockFrom = vi.fn(() => ({ select: mockSelect }));
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: mockFrom, rpc: vi.fn() });
+
+    const { getVaultContext } = await import("@/lib/vault-client");
+    const context = await getVaultContext(["Nobody Real"]);
+    expect(context).toBeNull();
+  });
+
+  it("returns null when vault is not configured", async () => {
+    vi.stubEnv("VAULT_SUPABASE_URL", "");
+    vi.stubEnv("VAULT_SUPABASE_SERVICE_ROLE_KEY", "");
+    vi.resetModules();
+
+    const { getVaultContext } = await import("@/lib/vault-client");
+    const context = await getVaultContext(["Anyone"]);
+    expect(context).toBeNull();
+  });
+
+  it("truncates output to roughly 2000 tokens", async () => {
+    const { createClient } = await import("@supabase/supabase-js");
+
+    const longContent = "A".repeat(10000);
+    const personRow = {
+      file_path: "company/people/verbose-person.md",
+      title: "Verbose Person",
+      content: longContent,
+      frontmatter: { type: "person", department: "Engineering" },
+      tags: ["person"],
+      wikilinks: [],
+      backlinks: [],
+    };
+
+    const mockSingle = vi.fn().mockResolvedValue({ data: personRow, error: null });
+    const mockIlike = vi.fn(() => ({ single: mockSingle }));
+    const mockEq = vi.fn(() => ({ ilike: mockIlike }));
+    const mockSelect = vi.fn(() => ({ eq: mockEq }));
+    const mockFrom = vi.fn(() => ({ select: mockSelect }));
+    const mockRpc = vi.fn().mockResolvedValue({ data: [], error: null });
+    (createClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: mockFrom, rpc: mockRpc });
+
+    const { getVaultContext } = await import("@/lib/vault-client");
+    const context = await getVaultContext(["Verbose Person"]);
+
+    expect(context).not.toBeNull();
+    // ~2000 tokens ≈ ~8000 chars. Allow some headroom for the truncation marker.
+    expect(context!.length).toBeLessThan(9000);
+  });
+});

@@ -176,6 +176,134 @@ export async function getVaultConnections(
   }
 }
 
+const MAX_CONTEXT_CHARS = 8000; // ~2000 tokens
+
+/**
+ * Build a consolidated vault context string for AI prompt injection.
+ * Gathers person pages + their graph connections + optional topic search.
+ * Returns null if vault is not configured or no useful context found.
+ */
+export async function getVaultContext(
+  names: string[],
+  topics?: string[]
+): Promise<string | null> {
+  const client = getVaultClient();
+  if (!client || names.length === 0) return null;
+
+  try {
+    // Look up each person in parallel
+    const personResults = await Promise.all(
+      names.slice(0, 10).map((name) => getVaultPerson(name))
+    );
+    const people = personResults.filter(
+      (p): p is VaultPerson => p !== null
+    );
+
+    // Get connections for each found person in parallel
+    const connectionResults = await Promise.all(
+      people.map((p) => getVaultConnections(p.file_path))
+    );
+
+    // Optional topic search
+    let topicResults: VaultSearchResult[] = [];
+    if (topics && topics.length > 0) {
+      const searchResults = await Promise.all(
+        topics.slice(0, 3).map((t) => searchVaultText(t, 5))
+      );
+      topicResults = searchResults.flat();
+    }
+
+    // Build the context string
+    return formatVaultContext(people, connectionResults, topicResults);
+  } catch (e) {
+    console.warn("[vault-client] getVaultContext failed:", e);
+    return null;
+  }
+}
+
+function formatVaultContext(
+  people: VaultPerson[],
+  connectionsByPerson: VaultConnection[][],
+  topicResults: VaultSearchResult[]
+): string | null {
+  const sections: string[] = [];
+
+  // People section
+  if (people.length > 0) {
+    const lines = people.map((person, i) => {
+      const connections = connectionsByPerson[i] ?? [];
+      const initiatives = connections
+        .filter((c) => c.connected_folder.startsWith("company/initiatives"))
+        .map((c) => c.connected_title);
+      const intel = connections
+        .filter((c) => c.connected_folder.startsWith("company/intelligence"))
+        .map((c) => c.connected_title);
+      const decisions = connections
+        .filter((c) => c.connected_folder.startsWith("company/decisions"))
+        .map((c) => c.connected_title);
+
+      let line = `- ${person.title}`;
+      if (person.department) line += `: ${person.department} department`;
+      if (initiatives.length > 0)
+        line += `. Initiatives: ${initiatives.join(", ")}`;
+      if (decisions.length > 0)
+        line += `. Decisions: ${decisions.join(", ")}`;
+      if (intel.length > 0)
+        line += `. Intel: ${intel.slice(0, 3).join(", ")}`;
+      return line;
+    });
+    sections.push(`PEOPLE:\n${lines.join("\n")}`);
+  }
+
+  // Related initiatives from connections (deduplicated)
+  const allInitiatives = new Map<string, string>();
+  for (const connections of connectionsByPerson) {
+    for (const c of connections) {
+      if (
+        c.connected_folder.startsWith("company/initiatives") &&
+        !allInitiatives.has(c.connected_path)
+      ) {
+        const tagStr = c.connected_tags?.length
+          ? ` (${c.connected_tags.join(", ")})`
+          : "";
+        allInitiatives.set(c.connected_path, `- ${c.connected_title}${tagStr}`);
+      }
+    }
+  }
+  if (allInitiatives.size > 0) {
+    sections.push(
+      `RELATED INITIATIVES:\n${[...allInitiatives.values()].join("\n")}`
+    );
+  }
+
+  // Topic search results (deduplicated against people/initiatives already listed)
+  const listedPaths = new Set([
+    ...people.map((p) => p.file_path),
+    ...allInitiatives.keys(),
+  ]);
+  const uniqueTopics = topicResults.filter(
+    (r) => !listedPaths.has(r.file_path)
+  );
+  if (uniqueTopics.length > 0) {
+    const lines = uniqueTopics.slice(0, 5).map((r) => {
+      const tagStr = r.tags?.length ? ` (${r.tags.join(", ")})` : "";
+      return `- ${r.title} [${r.folder}]${tagStr}`;
+    });
+    sections.push(`RELATED CONTEXT:\n${lines.join("\n")}`);
+  }
+
+  if (sections.length === 0) return null;
+
+  let output = `=== Organizational Knowledge (from Vault Graph) ===\n\n${sections.join("\n\n")}`;
+
+  // Truncate to token budget
+  if (output.length > MAX_CONTEXT_CHARS) {
+    output = output.slice(0, MAX_CONTEXT_CHARS).trimEnd() + "\n\n[truncated]";
+  }
+
+  return output;
+}
+
 /**
  * Fetch a vault page by title and folder.
  * Returns the page content string, or null if not found or vault not configured.
