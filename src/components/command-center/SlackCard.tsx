@@ -8,11 +8,14 @@ import { useSlackFeed } from "@/hooks/useSlackFeed";
 import { useAttention } from "@/lib/attention/client";
 import { buildSlackAttentionTarget } from "@/lib/attention/targets";
 import { useConnections } from "@/hooks/useConnections";
+import { CaptureButton } from "@/components/ui/CaptureButton";
+import { useVaultCaptureContext } from "@/components/modals/VaultCaptureProvider";
 
 export function SlackCard() {
   const { messages, loading } = useSlackFeed();
   const { slack: slackConnected } = useConnections();
   const { applyTarget } = useAttention();
+  const { open: openCapture } = useVaultCaptureContext();
 
   const rankedMessages = messages
     .map((message) => {
@@ -75,6 +78,18 @@ export function SlackCard() {
                 target={target}
                 surface="signals"
                 compact
+              />
+              <CaptureButton
+                compact
+                content={msg.text || ""}
+                sourceType="slack"
+                sourceMeta={{
+                  from: msg.author_name,
+                  channel: msg.channel_name,
+                  timestamp: msg.timestamp,
+                  url: msg.permalink ?? undefined,
+                }}
+                onCapture={openCapture}
               />
               {msg.permalink && (
                 <a
