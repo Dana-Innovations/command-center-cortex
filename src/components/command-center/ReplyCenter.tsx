@@ -14,6 +14,9 @@ import { useSlackFeed } from "@/hooks/useSlackFeed";
 import { useAsanaComments } from "@/hooks/useAsanaComments";
 import { useAttention } from "@/lib/attention/client";
 import { useLiveData } from "@/lib/live-data-context";
+import { CaptureButton } from "@/components/ui/CaptureButton";
+import { useVaultCaptureContext } from "@/components/modals/VaultCaptureProvider";
+import type { CaptureSourceType } from "@/lib/capture-routing";
 import type { EmailDetail } from "@/lib/email-reply";
 import type { AsanaCommentEntry, AsanaThreadDetail, Task } from "@/lib/types";
 import {
@@ -561,6 +564,7 @@ export function ReplyCenter() {
   const { user } = useAuth();
   const { applyTarget, replyPreferences, updateReplyPreferences } = useAttention();
   const { addToast } = useToast();
+  const { open: openCapture } = useVaultCaptureContext();
 
   const loading = emailsLoading || chatsLoading || slackLoading || asanaLoading;
 
@@ -2146,6 +2150,24 @@ export function ReplyCenter() {
                           </div>
 
                           <div className="flex shrink-0 items-center gap-2 lg:w-auto lg:justify-end">
+                            <CaptureButton
+                              compact
+                              content={item.summary || item.message || item.title}
+                              sourceType={
+                                item.source === "slack_context"
+                                  ? "slack"
+                                  : item.source === "asana_comment"
+                                    ? "asana"
+                                    : (item.source as CaptureSourceType)
+                              }
+                              sourceMeta={{
+                                from: item.sender,
+                                subject: item.title,
+                                timestamp: item.timestamp,
+                                url: item.url || undefined,
+                              }}
+                              onCapture={openCapture}
+                            />
                             <button
                               className={cn(
                                 "rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer",
