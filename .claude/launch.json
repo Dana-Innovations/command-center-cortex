@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "next-dev-https",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "vitest-watch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:watch"]
+    }
+  ]
+}
