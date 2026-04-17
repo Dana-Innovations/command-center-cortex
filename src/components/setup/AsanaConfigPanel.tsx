@@ -4,13 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAttention } from "@/lib/attention/client";
 import { ResourcePicker, type ResourceItem } from "./ResourcePicker";
+import type { ServicePreference } from "@/lib/setup-flow";
 
 interface AsanaConfigPanelProps {
   onSave: (config: Record<string, unknown>) => Promise<void>;
   onSkip: () => void;
+  preference: ServicePreference | null;
 }
 
-export function AsanaConfigPanel({ onSave, onSkip }: AsanaConfigPanelProps) {
+export function AsanaConfigPanel({ onSave, onSkip, preference }: AsanaConfigPanelProps) {
   const { focusProviders, focusMapLoading } = useAttention();
   const [saving, setSaving] = useState(false);
 
@@ -23,17 +25,20 @@ export function AsanaConfigPanel({ onSave, onSkip }: AsanaConfigPanelProps) {
 
   useEffect(() => {
     if (asanaProjects.length > 0 && items.length === 0) {
+      const saved = Array.isArray(preference?.config?.projects)
+        ? new Set(preference.config.projects as string[])
+        : null;
       setItems(
         asanaProjects.map((node) => ({
           id: node.entityId,
           label: node.label,
           description: node.description,
           count: node.counts?.total ?? 0,
-          checked: node.metadata?.archived !== true,
+          checked: saved ? saved.has(node.entityId) : node.metadata?.archived !== true,
         }))
       );
     }
-  }, [asanaProjects, items.length]);
+  }, [asanaProjects, items.length, preference]);
 
   const handleChange = useCallback((id: string, checked: boolean) => {
     setItems((prev) =>

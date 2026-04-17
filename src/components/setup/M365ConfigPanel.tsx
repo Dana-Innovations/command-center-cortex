@@ -5,10 +5,12 @@ import { Button } from "@/components/ui/button";
 import { useAttention } from "@/lib/attention/client";
 import { ResourcePicker, type ResourceItem } from "./ResourcePicker";
 import type { FocusNode } from "@/lib/attention/types";
+import type { ServicePreference } from "@/lib/setup-flow";
 
 interface M365ConfigPanelProps {
   onSave: (config: Record<string, unknown>) => Promise<void>;
   onSkip: () => void;
+  preference: ServicePreference | null;
 }
 
 const LOW_SIGNAL_PATTERNS = [
@@ -161,10 +163,23 @@ function TeamAccordion({
   );
 }
 
-export function M365ConfigPanel({ onSave, onSkip }: M365ConfigPanelProps) {
+export function M365ConfigPanel({ onSave, onSkip, preference }: M365ConfigPanelProps) {
   const { focusProviders, focusMapLoading, ensureTeamChannels } = useAttention();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+
+  const savedFolderIds = useMemo(() => {
+    const folders = preference?.config?.folders;
+    return Array.isArray(folders) ? new Set(folders as string[]) : null;
+  }, [preference]);
+
+  const savedTeamsConfig = useMemo(() => {
+    const teamsConfig = preference?.config?.teams;
+    if (!teamsConfig || typeof teamsConfig !== "object" || Array.isArray(teamsConfig)) {
+      return null;
+    }
+    return teamsConfig as Record<string, string[]>;
+  }, [preference]);
 
   // --- Step 1: Folders ---
   const mailFolders = useMemo(() => {
@@ -179,9 +194,16 @@ export function M365ConfigPanel({ onSave, onSkip }: M365ConfigPanelProps) {
 
   useEffect(() => {
     if (mailFolders.length > 0 && folderItems.length === 0) {
-      setFolderItems(mailFolders.map(folderToResource));
+      setFolderItems(
+        mailFolders.map((node) => {
+          const base = folderToResource(node);
+          return savedFolderIds
+            ? { ...base, checked: savedFolderIds.has(node.entityId) }
+            : base;
+        })
+      );
     }
-  }, [mailFolders, folderItems.length]);
+  }, [mailFolders, folderItems.length, savedFolderIds]);
 
   const handleFolderChange = useCallback((id: string, checked: boolean) => {
     setFolderItems((prev) =>
@@ -210,9 +232,22 @@ export function M365ConfigPanel({ onSave, onSkip }: M365ConfigPanelProps) {
     new Map()
   );
 
-  // Pre-select teams that have children
+  // Pre-select teams that have children (or load from saved preference)
   useEffect(() => {
     if (teams.length > 0 && selectedTeams.size === 0) {
+      if (savedTeamsConfig) {
+        setSelectedTeams(new Set(Object.keys(savedTeamsConfig)));
+        const channelMap = new Map<string, Set<string>>();
+        for (const [teamId, channelIds] of Object.entries(savedTeamsConfig)) {
+          if (Array.isArray(channelIds) && channelIds.length > 0) {
+            channelMap.set(teamId, new Set(channelIds));
+          }
+        }
+        if (channelMap.size > 0) {
+          setSelectedChannels(channelMap);
+        }
+        return;
+      }
       const withChildren = new Set(
         teams
           .filter((t) => t.children && t.children.length > 0)
@@ -225,7 +260,7 @@ export function M365ConfigPanel({ onSave, onSkip }: M365ConfigPanelProps) {
           : new Set(teams.map((t) => t.entityId))
       );
     }
-  }, [teams, selectedTeams.size]);
+  }, [teams, selectedTeams.size, savedTeamsConfig]);
 
   const handleExpandTeam = useCallback(
     async (teamId: string) => {

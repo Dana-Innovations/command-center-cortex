@@ -4,13 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAttention } from "@/lib/attention/client";
 import { ResourcePicker, type ResourceItem } from "./ResourcePicker";
+import type { ServicePreference } from "@/lib/setup-flow";
 
 interface SlackConfigPanelProps {
   onSave: (config: Record<string, unknown>) => Promise<void>;
   onSkip: () => void;
+  preference: ServicePreference | null;
 }
 
-export function SlackConfigPanel({ onSave, onSkip }: SlackConfigPanelProps) {
+export function SlackConfigPanel({ onSave, onSkip, preference }: SlackConfigPanelProps) {
   const { focusProviders, focusMapLoading } = useAttention();
   const [saving, setSaving] = useState(false);
 
@@ -23,17 +25,20 @@ export function SlackConfigPanel({ onSave, onSkip }: SlackConfigPanelProps) {
 
   useEffect(() => {
     if (slackChannels.length > 0 && items.length === 0) {
+      const saved = Array.isArray(preference?.config?.channels)
+        ? new Set(preference.config.channels as string[])
+        : null;
       setItems(
         slackChannels.map((node) => ({
           id: node.entityId,
           label: node.label,
           description: node.description,
           count: node.counts?.total ?? 0,
-          checked: true, // pre-check all
+          checked: saved ? saved.has(node.entityId) : true,
         }))
       );
     }
-  }, [slackChannels, items.length]);
+  }, [slackChannels, items.length, preference]);
 
   const handleChange = useCallback((id: string, checked: boolean) => {
     setItems((prev) =>

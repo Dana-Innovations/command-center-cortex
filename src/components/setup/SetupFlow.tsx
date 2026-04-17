@@ -93,12 +93,15 @@ export function SetupFlow({ onComplete }: SetupFlowProps) {
   );
 
   function renderConfigPanel(id: ServiceId) {
+    const entry = services.find((s) => s.definition.id === id);
+    const preference = entry?.preference ?? null;
     switch (id) {
       case "m365":
         return (
           <M365ConfigPanel
             onSave={handleSaveConfig(id)}
             onSkip={handleSkipConfig(id)}
+            preference={preference}
           />
         );
       case "slack":
@@ -106,6 +109,7 @@ export function SetupFlow({ onComplete }: SetupFlowProps) {
           <SlackConfigPanel
             onSave={handleSaveConfig(id)}
             onSkip={handleSkipConfig(id)}
+            preference={preference}
           />
         );
       case "asana":
@@ -113,6 +117,7 @@ export function SetupFlow({ onComplete }: SetupFlowProps) {
           <AsanaConfigPanel
             onSave={handleSaveConfig(id)}
             onSkip={handleSkipConfig(id)}
+            preference={preference}
           />
         );
       case "powerbi":
